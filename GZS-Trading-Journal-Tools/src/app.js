@@ -149,6 +149,27 @@
   ['entry','exit'].forEach(k=>$('#'+k+'Photo').addEventListener('change',async e=>{const value=await readPhoto(e.target.files[0]);if(value){photoValues[k+'Photo']=value;const img=$('#'+k+'Preview');img.src=value;img.hidden=false}}));
   form.onsubmit=async e=>{e.preventDefault();let id=$('#tradeId').value||('trade_'+Date.now());const selectedSession=sessions.find(item=>item.id===$('#tradeSession').value);const previousTrade=trades.find(item=>item.id===id);const t={id,symbol:$('#symbol').value,direction:$('#direction').value,entryDate:$('#entryDate').value,exitDate:$('#exitDate').value,entryPrice:$('#entryPrice').value===''?'':Number($('#entryPrice').value),exitPrice:$('#exitPrice').value===''?'':Number($('#exitPrice').value),quantity:Number($('#quantity').value||0),pnl:Number($('#pnl').value||0),strategy:$('#strategy').value.trim(),tags:$('#tags').value.trim(),notes:$('#notes').value.trim(),sessionId:selectedSession?.id||'',sessionName:selectedSession?.name||($('#tradeSession').value?previousTrade?.sessionName||'':''),sessionColor:selectedSession?.color||($('#tradeSession').value?previousTrade?.sessionColor||'':''),...photoValues,commission:Number($('#commission').value||0),swap:Number($('#swap').value||0),fees:Number($('#fees').value||0),pips:$('#tradePips').value===''?'':Number($('#tradePips').value)};const i=trades.findIndex(x=>x.id===id);if(i>=0)trades[i]=t;else trades.push(t);persist();dlg.close();render();window.dispatchEvent(new Event('gzs:trades-changed'))};
   $('#deleteTradeBtn').onclick=()=>{let id=$('#tradeId').value;if(confirm('Delete this trade permanently?')){trades=trades.filter(t=>t.id!==id);persist();dlg.close();render();window.dispatchEvent(new Event('gzs:trades-changed'))}};
+  // --- Click outside a dialog (on the backdrop) closes it --------------------
+  // Applies to every <dialog> in the app (trade dialog, delete confirmation,
+  // backup picker, import preview, dashboard range). A click only counts as
+  // "outside" when it lands past the dialog's own box — clicks on the
+  // dialog's padding/scrollbar keep working as inside clicks. The click
+  // that OPENS a dialog is ignored (its target lies outside the dialog box
+  // but must not immediately close it).
+  let dialogOpenedAt=0;
+  if(!HTMLDialogElement.prototype.showModal.__gzsPatched){
+    const origShowModal=HTMLDialogElement.prototype.showModal;
+    HTMLDialogElement.prototype.showModal=function(...args){dialogOpenedAt=Date.now();return origShowModal.apply(this,args)};
+    HTMLDialogElement.prototype.showModal.__gzsPatched=true;
+  }
+  document.addEventListener('click',e=>{
+    if(Date.now()-dialogOpenedAt<200) return;
+    const open=document.querySelector('dialog[open]');
+    if(!open) return;
+    const rect=open.getBoundingClientRect();
+    const inside=e.clientX>=rect.left&&e.clientX<=rect.right&&e.clientY>=rect.top&&e.clientY<=rect.bottom;
+    if(!inside) open.close('backdrop');
+  });
   function download(name,data,type){const blob=new Blob([data],{type}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)}
   async function exportJson(){const pad=n=>String(n).padStart(2,'0');const d=new Date();const ts=`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} _ ${pad(d.getHours())}-${pad(d.getMinutes())}`,filename=`trade-journal-backup ${ts}.json`,content=JSON.stringify({version:3,exportedAt:new Date().toISOString(),trades,instruments,sessions,balanceBase,balanceAdjustments},null,2);try{const response=await fetch(`/api/backups?filename=${encodeURIComponent(filename)}`,{method:'POST',headers:{'Content-Type':'application/json'},body:content}),result=await response.json().catch(()=>null);if(!response.ok||!result?.ok)throw Error(result?.error||'Backup folder is unavailable');alert(`Backup saved to ${result.file}.`)}catch(error){download(filename,content,'application/json');alert(`Could not save to public/backups; the backup was downloaded instead. ${error.message}`)}}
   function exportCsv(){const keys=['symbol','direction','sessionName','sessionColor','entryDate','exitDate','entryPrice','exitPrice','quantity','pnl','strategy','tags','notes'];const q=v=>'"'+String(v??'').replace(/"/g,'""')+'"';download('trade-journal.csv',[keys.join(','),...trades.map(t=>keys.map(k=>q(t[k])).join(','))].join('\n'),'text/csv;charset=utf-8')}
