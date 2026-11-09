@@ -112,7 +112,23 @@
           </label>
           <label>
             Net P&amp;L (account currency)
-            <input id="pnl" type="number" step="any" placeholder="0.00" />
+            <input id="pnl" type="number" step="0.01" placeholder="0.00" />
+          </label>
+          <label>
+            Final pips (auto)
+            <input id="tradePips" type="number" step="0.01" placeholder="auto" />
+          </label>
+          <label>
+            Commission
+            <input id="commission" type="number" step="0.01" placeholder="0.00" />
+          </label>
+          <label>
+            Swap
+            <input id="swap" type="number" step="0.01" placeholder="0.00" />
+          </label>
+          <label>
+            Other fees
+            <input id="fees" type="number" step="0.01" placeholder="0.00" />
           </label>
           <label>
             Entry date &amp; time
@@ -124,15 +140,32 @@
           </label>
           <label>
             Entry price
-            <input id="entryPrice" type="number" step="any" placeholder="0.00" />
+            <div class="price-calc-row">
+              <input id="entryPrice" type="number" step="0.01" placeholder="0.00" />
+              <button type="button" class="secondary-btn calculate-btn" id="entryLookupBtn" title="Look up the historical XAUUSD price for the entry date and time">Lookup</button>
+            </div>
+            <small id="entryLookupStatus" class="lookup-status" hidden></small>
           </label>
           <label>
             Exit price
-            <input id="exitPrice" type="number" step="any" placeholder="0.00" />
+            <div class="price-calc-row">
+              <input id="exitPrice" type="number" step="0.01" placeholder="0.00" />
+              <button type="button" class="secondary-btn calculate-btn" id="exitLookupBtn" title="Look up the historical XAUUSD price for the exit date and time">Lookup</button>
+            </div>
+            <small id="exitLookupStatus" class="lookup-status" hidden></small>
           </label>
+          <div class="hist-summary full" id="histCalcSummary" hidden>
+            <div class="hist-summary-title">Calculated results</div>
+            <div class="hist-summary-values">
+              <span>Final pips <b id="calcPips">—</b></span>
+              <span>Gross P/L <b id="calcGross">—</b></span>
+              <span>Net P/L <b id="calcNet">—</b></span>
+            </div>
+            <small id="calcNote"></small>
+          </div>
           <label>
             Quantity / lots
-            <input id="quantity" type="number" step="any" value="0.01" />
+            <input id="quantity" type="number" step="0.01" value="0.01" />
           </label>
           <label>
             Strategy

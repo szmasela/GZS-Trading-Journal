@@ -167,3 +167,55 @@ body.dashboard-is-dragging .calendar-hover-tooltip{visibility:hidden}
 .clerk-setup-card code{color:var(--amber);background:var(--panel2);border-radius:5px;padding:2px 5px;font-size:12px}
 .clerk-setup-card pre{background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:10px 12px;color:var(--amber);font-size:12.5px;overflow:auto}
 .clerk-setup-muted{font-size:11px}
+
+/* ---------------- backup import summary ---------------- */
+.import-summary-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:14px 0 4px}
+.import-stat{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px}
+.import-stat b{display:block;font-size:22px;letter-spacing:-.5px;margin-bottom:4px}
+.import-stat span{color:var(--muted);font-size:11px}
+.import-preserved{color:var(--green);font-size:12px;font-weight:700;margin-top:8px}
+.import-preserved-muted{color:var(--muted);font-weight:400;font-size:11px;margin-top:4px}
+
+/* --- Historical XAUUSD price lookup (trade dialog) --- */
+.hist-box,.hist-summary{background:color-mix(in srgb,var(--blue) 6%,var(--panel));border:1px solid var(--line);border-radius:8px;padding:10px 12px;display:flex;flex-direction:column;gap:6px}
+.hist-head{display:flex;justify-content:space-between;align-items:center;font-size:11px;font-weight:600;letter-spacing:.06em;color:var(--muted);text-transform:uppercase}
+.hist-field{background:transparent;border:1px solid var(--line);border-radius:6px;color:var(--text);font-size:12px;padding:3px 6px}
+.hist-price{font-size:20px;font-weight:650;color:var(--blue)}
+.hist-status{font-size:12px;color:var(--green)}
+.hist-status.inexact{color:#e0a356}
+.hist-status.applied{color:var(--green)}
+.hist-note{font-size:11px;color:var(--muted)}
+.hist-actions{display:flex;gap:8px}
+.hist-use-btn{background:color-mix(in srgb,var(--blue) 18%,transparent);color:var(--text);border:1px solid color-mix(in srgb,var(--blue) 45%,var(--line));border-radius:6px;padding:6px 10px;font-size:12px;font-weight:550;cursor:pointer}
+.hist-use-btn:hover{background:color-mix(in srgb,var(--blue) 30%,transparent)}
+.hist-use-btn:disabled{opacity:.5;cursor:default}
+.hist-dismiss-btn{background:transparent;color:var(--muted);border:1px solid var(--line);border-radius:6px;padding:6px 10px;font-size:12px;cursor:pointer}
+.hist-dismiss-btn:hover{color:var(--text)}
+.hist-summary{background:color-mix(in srgb,var(--blue) 8%,var(--panel));border:1px solid color-mix(in srgb,var(--blue) 30%,var(--line))}
+.hist-summary-title{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.hist-summary-values{display:flex;gap:18px;flex-wrap:wrap;font-size:12px;color:var(--muted);align-items:baseline}
+.hist-summary-values b{font-size:14px;margin-left:6px;color:var(--text)}
+.hist-summary-values b.positive{color:var(--green)}
+.hist-summary-values b.negative{color:var(--red)}
+.hist-summary small{color:var(--muted)}
+.calc-msg{font-size:11px;color:var(--muted);align-self:center;margin-right:8px}
+.price-calc-row{display:flex;gap:8px;align-items:stretch}
+.price-calc-row input{flex:1;min-width:0}
+.calculate-btn{white-space:nowrap;border-color:var(--text)!important;color:var(--text)!important;min-width:92px}
+.calculate-btn:hover{background:color-mix(in srgb,var(--text) 10%,transparent)!important}
+.lookup-status{font-size:11px;font-weight:450;color:var(--muted)}
+.lookup-status.ok{color:var(--green)}
+.lookup-status.error{color:var(--red)}
+.lookup-status.loading{color:var(--muted)}
+
+/* --- Native dropdown (option list) theme consistency ---------------------- */
+/* Chromium picks the popup colors from the select's color-scheme; explicit  */
+/* option styling guarantees dark backgrounds, readable text and a visible  */
+/* highlight for the selected/hovered option in every dropdown.             */
+html:not(.light) select{color-scheme:dark}
+.light select{color-scheme:light}
+select option,select optgroup{background:#0e141b;color:var(--text)}
+select option:checked,select option:hover{background:#1b302d;color:#f4f4f4}
+.form-grid select option:checked{background:#1b302d}
+.light-mode select option,.light-mode select optgroup{background:#f7f9fb;color:var(--text)}
+.light-mode select option:checked,.light-mode select option:hover{background:#e2f8ef;color:#0b0b0b}

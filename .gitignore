@@ -5,3 +5,6 @@ dist/
 .agents/
 .playwright-cli/
 skills-lock.json
+
+# local backup exports (personal data)
+GZS-Trading-Journal-Tools/public/backups/
