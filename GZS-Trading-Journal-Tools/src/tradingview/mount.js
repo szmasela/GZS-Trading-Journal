@@ -174,6 +174,21 @@ function buildActivePanel(panel) {
     ? `${open.length} open`
     : ''
 
+  // keep the collapsed/expanded state in sync with the user's choice
+  panel.classList.toggle('collapsed', !state.panelOpen)
+  const headEl = panel.querySelector('#tvActiveHead')
+
+  // a trade logged while the panel is collapsed nudges the header so the
+  // new position isn't missed
+  const prevCount = Number(panel.dataset.count || 0)
+  panel.dataset.count = String(open.length)
+  if (headEl && !state.panelOpen && prevCount > 0 && open.length > prevCount) {
+    headEl.classList.remove('tv-pulse')
+    void headEl.offsetWidth
+    headEl.classList.add('tv-pulse')
+    setTimeout(() => headEl.classList.remove('tv-pulse'), 1400)
+  }
+
   // With no open trades, only the Buy/Sell buttons remain — hide the panel
   panel.hidden = open.length === 0
   if (open.length === 0) {
@@ -186,38 +201,89 @@ function buildActivePanel(panel) {
       const long = String(t.direction).toLowerCase() === 'long'
       const spec = getSpec(t.symbol)
       return `
-        <div class="tv-active-row" data-id="${t.id}" data-symbol="${normalizeSymbol(t.symbol)}">
+        <div class="tv-active-row" data-id="${t.id}" data-symbol="${normalizeSymbol(t.symbol)}" title="Click to open this trade and edit its strategy and notes">
           <span class="tv-trade-side ${long ? 'long' : 'short'}">${long ? 'BUY' : 'SELL'}</span>
           <span class="tv-cell tv-open">${fmtPrice(t.entryPrice, spec)}</span>
           <span class="tv-cell">${t.quantity ?? '—'}</span>
           <span class="tv-cell tv-cur" data-role="market">…</span>
           <span class="tv-cell tv-pnl flat" data-role="pnl">…</span>
-          <button type="button" class="tv-close-btn" data-id="${t.id}" title="Close this trade — fills exit price & time, calculates pips and net P/L">Close</button>
+          <span class="tv-row-actions">
+            <button type="button" class="tv-row-btn tv-close-btn" data-id="${t.id}" title="Close this trade at the current market price — saved immediately">Close</button>
+          </span>
         </div>`
     })
     .join('')
 
-  // The dialog opens ONLY via the Close button — clicking elsewhere on the
-  // row does nothing, so accidental edits of an open trade are impossible.
+  // The row itself opens the trade dialog (strategy + notes); the Close
+  // button inside it saves the closing details immediately. They are
+  // independent — Close never opens the dialog.
 
-  // close button = prefill the dialog for closing (exit price = live market)
+  list.querySelectorAll('.tv-active-row').forEach((row) => {
+    row.onclick = (e) => {
+      if (e.target.closest('.tv-close-btn')) return // handled by its own click
+      const trade = (state.getTrades() || []).find((t) => t.id === row.dataset.id)
+      if (!trade || !state.openTrade) return
+      // exit fields are left untouched — this only opens the record for
+      // strategy/notes editing, it never closes the trade
+      state.openTrade({ ...trade, __focus: 'strategy' })
+    }
+  })
+
   list.querySelectorAll('.tv-close-btn').forEach((btn) => {
-    btn.onclick = (e) => {
+    btn.onclick = async (e) => {
       e.stopPropagation()
       const trade = (state.getTrades() || []).find((t) => t.id === btn.dataset.id)
-      if (!trade || !state.openTrade) return
-      // live exit-price prefill is part of the XAUUSD auto-calc feature
-      const live = isAutoCalc(trade.symbol) ? state.lastQuotes[normalizeSymbol(trade.symbol)] : null
-      state.openTrade({
-        ...trade,
-        exitDate: localDateTime(),
-        exitPrice: live && live.price != null ? live.price : ''
-      })
+      if (!trade) return
+
+      // Closing needs a real price. Use the last live quote (XAUUSD) and
+      // fetch one if the panel has none yet.
+      let price = null
+      const sym = normalizeSymbol(trade.symbol)
+      if (isAutoCalc(sym)) {
+        const cached = state.lastQuotes[sym]
+        if (cached && cached.price != null) price = cached.price
+        else {
+          const q = await getQuote(sym)
+          if (q && q.price != null) {
+            state.lastQuotes[sym] = q
+            price = q.price
+          }
+        }
+      }
+
+      if (price != null && state.closeTrade) {
+        btn.disabled = true
+        btn.textContent = '…'
+        const closed = await state.closeTrade(trade.id, price)
+        if (closed) return // row disappears via gzs:trades-changed
+        btn.disabled = false
+        btn.textContent = 'Close'
+      }
+
+      // No price available (instrument without a feed, or feed down): never
+      // invent one — open the dialog so the exit price can be entered manually.
+      if (state.openTrade) {
+        state.openTrade({ ...trade, exitDate: localDateTime(), exitPrice: price != null ? price : '' })
+      }
     }
   })
 
   state.onOpenChanged && state.onOpenChanged(open)
   updateLiveValues(panel)
+}
+
+/** Total floating P/L of the open trades, shown in the panel header. */
+function setHeaderTotal(panel, value) {
+  const el = panel.querySelector('#tvTotalPnl')
+  if (!el) return
+  if (value == null || !Number.isFinite(Number(value))) {
+    el.textContent = '—'
+    el.className = 'tv-total-pnl flat'
+    return
+  }
+  const n = Number(value)
+  el.textContent = `${n > 0 ? '+' : ''}${fmtMoney(n)}`
+  el.className = 'tv-total-pnl ' + pnlClass(n)
 }
 
 /** Fetch quotes for every open symbol and patch the rows in place. */
@@ -241,6 +307,7 @@ async function updateLiveValues(panel) {
 
   const badge = panel.querySelector('#tvLiveBadge')
   if (badge) badge.hidden = liveRows.length === 0
+  setHeaderTotal(panel, null)
 
   const symbols = [...new Set(liveRows.map((r) => r.dataset.symbol))]
   if (!symbols.length) return
@@ -259,6 +326,9 @@ async function updateLiveValues(panel) {
     badge.textContent = STATUS_LABEL[worst] || 'NO DATA'
     badge.className = 'tv-live-badge ' + worst
   }
+
+  let totalPnl = 0
+  let counted = 0
 
   liveRows.forEach((row) => {
     const q = quotes[row.dataset.symbol]
@@ -288,7 +358,11 @@ async function updateLiveValues(panel) {
       pnlEl.textContent = fmtMoney(floating)
       pnlEl.className = 'tv-cell tv-pnl ' + pnlClass(floating)
     }
+    totalPnl += floating
+    counted += 1
   })
+
+  setHeaderTotal(panel, counted ? totalPnl : null)
 }
 
 export function mountTradingView(host, api = {}) {
@@ -299,6 +373,7 @@ export function mountTradingView(host, api = {}) {
     interval: localStorage.getItem(INTERVAL_KEY) || CHART_CONFIG.interval,
     openTrade: typeof api.openTrade === 'function' ? api.openTrade : null,
     addTrade: typeof api.addTrade === 'function' ? api.addTrade : null,
+    closeTrade: typeof api.closeTrade === 'function' ? api.closeTrade : null,
     getTrades: typeof api.getTrades === 'function' ? api.getTrades : () => [],
     lastQuotes: {}
   }
@@ -319,11 +394,15 @@ export function mountTradingView(host, api = {}) {
               <button type="button" id="tvSell" class="tv-trade-btn tv-sell" title="Log a Short trade for this symbol">▼ Sell</button>
               <button type="button" id="tvBuy" class="tv-trade-btn tv-buy" title="Log a Long trade for this symbol">▲ Buy</button>
             </div>
-            <div class="tv-active" id="tvActivePanel">
-              <div class="tv-active-head">
-                <span>Trades · <b id="tvActiveSymbol"></b></span>
-                <span id="tvLiveBadge" class="tv-live-badge">…</span>
-                <span id="tvActiveCount" class="tv-active-count"></span>
+            <div class="tv-active collapsed" id="tvActivePanel">
+              <div class="tv-active-head" id="tvActiveHead" title="Hover to show the open trades">
+                <span class="tv-head-title">Trades · <b id="tvActiveSymbol"></b></span>
+                <span class="tv-head-right">
+                  <span id="tvLiveBadge" class="tv-live-badge">…</span>
+                  <span id="tvTotalPnl" class="tv-total-pnl flat" title="Total floating P/L of the open trades shown">—</span>
+                  <span id="tvActiveCount" class="tv-active-count"></span>
+                  <span class="tv-chevron" aria-hidden="true">▾</span>
+                </span>
               </div>
               <div class="tv-cols">
                 <span></span>
@@ -411,6 +490,31 @@ export function mountTradingView(host, api = {}) {
   // --- active-trades overlay + live refresh ----------------------------------
   const panel = body.querySelector('#tvActivePanel')
   panel.__tvState = state
+
+  // --- hover-revealed open-trades panel -------------------------------------
+  // Only the slim header bar shows by default; hovering the bar (or tabbing
+  // into it with the keyboard) slides the trade rows out, and leaving the
+  // panel tucks them away again. No click needed.
+  state.panelOpen = false
+
+  function applyPanelState() {
+    panel.classList.toggle('collapsed', !state.panelOpen)
+  }
+
+  function setPanelOpen(open) {
+    if (state.panelOpen === open) return
+    state.panelOpen = open
+    applyPanelState()
+    if (open) updateLiveValues(panel)
+  }
+
+  panel.addEventListener('mouseenter', () => setPanelOpen(true))
+  panel.addEventListener('mouseleave', () => setPanelOpen(false))
+  panel.addEventListener('focusin', () => setPanelOpen(true))
+  panel.addEventListener('focusout', () => {
+    if (!panel.contains(document.activeElement)) setPanelOpen(false)
+  })
+  applyPanelState()
 
   // poll only while there are open trades; reset cleanly on re-mount
   if (host.__tvPollTimer) clearInterval(host.__tvPollTimer)
