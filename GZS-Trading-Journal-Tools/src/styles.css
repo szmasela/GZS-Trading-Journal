@@ -227,21 +227,3 @@ tbody tr.trade-row:active{background:#22303f}
 tbody tr.trade-row:focus-visible{outline:1px solid var(--blue);outline-offset:-2px}
 .light-mode tbody tr.trade-row:hover{background:#eef4fb}
 .light-mode tbody tr.trade-row:active{background:#e4eefa}
-
-/* --- Responsive action alignment ----------------------------------------- */
-/* Action buttons stay attached to the row or card they belong to. Nothing
-   here uses viewport coordinates: every group is placed by flex alignment, so
-   the distance from a button to its container's edge is the same at 1024px
-   and at 2560px instead of drifting towards the middle of the page. */
-.journal-toolbar{align-items:center}
-/* the search field takes the slack between the filters and the actions, up to
-   a readable width, so the buttons after it can stay pinned to the row edge */
-.journal-toolbar #tradeSearch{flex:1 1 220px;max-width:520px}
-.journal-toolbar #exportCsv{margin-left:auto}
-.toolbar-row{align-items:center}
-/* very narrow screens: the search field and its actions share a row without
-   pushing anything out of the card */
-@media (max-width:600px){
-  .journal-toolbar #tradeSearch{flex:1 1 100%;max-width:none}
-  .journal-toolbar #exportCsv{margin-left:0}
-}
