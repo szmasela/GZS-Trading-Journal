@@ -299,12 +299,17 @@
 /* ---------------- floating overlay: quick actions + open trades ---------------- */
 .tv-main { position: relative; }
 
+/* The quick-action group is a normal flex child of the topbar, pushed to the
+   right edge. It used to be pinned with `left: 585px`, which left it stranded
+   in the middle of wide displays and pushed it off-screen on narrow ones.
+   The open-trades panel is absolutely positioned so it still drops over the
+   chart without growing the topbar. */
 .tv-overlay {
-  position: absolute;
-  top: 0;
-  left: 585px;
+  position: relative;
+  flex: 0 1 452px;
+  min-width: 0;
+  margin-left: auto;
   z-index: 10;
-  width: 232px;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -325,6 +330,10 @@
 }
 
 .tv-active {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  width: 100%;
   background: rgba(16, 21, 28, .92);
   border: 1px solid var(--tv-line);
   border-radius: 10px;
@@ -401,6 +410,10 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
+  /* the panel is absolutely positioned now, so cap it rather than letting a
+     long list run off the bottom of the screen */
+  max-height: calc(100vh - 160px);
+  overflow-y: auto;
 }
 
 .tv-active-row {
@@ -455,12 +468,14 @@
 
 .tv-active-row:hover .tv-close-btn { background: #4d2a34; }
 
-@media (max-width: 900px) {
-  .tv-overlay { left: 10px; top: calc(100% + 8px); }
-}
-
-@media (max-width: 700px) {
-  .tv-overlay { width: 200px; }
+/* Narrow screens: the buttons take their own row under the symbol and
+   timeframe controls rather than being squeezed against them, and the
+   open-trades list joins that row instead of hanging over the chart toolbar. */
+@media (max-width: 760px) {
+  .tv-topbar { flex-wrap: wrap; }
+  .tv-overlay { flex: 1 1 100%; margin-left: 0; }
+  .tv-active { position: static; width: 100%; }
+  .tv-active-list { max-height: 42vh; }
 }
 
 /* ---------------- live pip / P/L rows ---------------- */
@@ -518,8 +533,6 @@
 .tv-live-pnl.flat { color: var(--tv-muted, #8b98ad); }
 
 /* ---------------- horizontal open-trades layout (mockup style) ---------------- */
-.tv-overlay { width: 452px; }
-
 .tv-cols,
 .tv-active-row {
   display: grid;
@@ -601,7 +614,3 @@
 .tv-row-btn:disabled { opacity: .6; cursor: default; }
 
 .tv-close-btn:hover { border-color: #64313c; background: #3a2028; color: #ff98a3; }
-
-@media (max-width: 900px) {
-  .tv-overlay { width: 452px; }
-}
