@@ -70,6 +70,10 @@ const INTERVAL_KEY = 'luxTVInterval'
 const VIEW_KEY = 'gzs.tv.view'
 const POLL_MS = 10 * 1000
 
+// The live TradingView widget instance — kept so the chart can be snapshotted
+// for a trade's entry / exit picture.
+let chartWidget = null
+
 /**
  * Read the remembered chart view.
  *
@@ -152,7 +156,7 @@ async function embedChart(target, config) {
   target.dataset.tvConfig = signature
   const TradingView = await loadChartScript()
   if (target.dataset.tvConfig !== signature) return
-  new TradingView.widget({
+  chartWidget = new TradingView.widget({
     ...config,
     width: '100%',
     height: '100%',
@@ -163,6 +167,37 @@ async function embedChart(target, config) {
     watchlist: config.watchlist,
     container_id: target.id
   })
+}
+
+// ---------------------------------------------------------------------------
+// Chart snapshots — stored with the trade as its entry / exit picture
+// ---------------------------------------------------------------------------
+// The widget can render its own canvas (`imageCanvas()`), which is the only
+// way to read the chart out of the cross-origin iframe. Note: TradingView's
+// widget snapshot draws the price action, studies and axes, but NOT the
+// line-tool drawings the user has added on top.
+const SNAPSHOT_WIDTH = 800
+const SNAPSHOT_QUALITY = 0.62
+
+/** Snapshot the chart as a compact JPEG data URL ('' when unavailable). */
+async function captureChart() {
+  if (!chartWidget || typeof chartWidget.imageCanvas !== 'function') return ''
+  try {
+    const source = await chartWidget.imageCanvas()
+    if (!source || !source.width || !source.height) return ''
+    const scale = Math.min(1, SNAPSHOT_WIDTH / source.width)
+    const canvas = document.createElement('canvas')
+    canvas.width = Math.round(source.width * scale)
+    canvas.height = Math.round(source.height * scale)
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return ''
+    ctx.fillStyle = '#000000'
+    ctx.fillRect(0, 0, canvas.width, canvas.height)
+    ctx.drawImage(source, 0, 0, canvas.width, canvas.height)
+    return canvas.toDataURL('image/jpeg', SNAPSHOT_QUALITY)
+  } catch {
+    return ''
+  }
 }
 
 function fmtMoney(value) {
@@ -299,7 +334,9 @@ function buildActivePanel(panel) {
         btn.textContent = '…'
         // keep the open-trades list visible across the row rebuild
         if (state.holdPanelOpen) state.holdPanelOpen()
-        const closed = await state.closeTrade(trade.id, price)
+        // snapshot the chart at the exit moment, before the row disappears
+        const snapshot = await captureChart()
+        const closed = await state.closeTrade(trade.id, price, snapshot)
         if (closed) return // row disappears via gzs:trades-changed
         if (state.endHold) state.endHold()
         btn.disabled = false
@@ -535,12 +572,16 @@ export function mountTradingView(host, api = {}) {
       }
     }
     const session = pickSession(new Date())
+    // Snapshot the chart as it looks at entry, so the trade keeps the picture
+    // it was taken from.
+    const snapshot = await captureChart()
     const payload = {
       symbol: sym,
       direction,
       entryDate: localDateTime(),
       entryPrice: price,
-      sessionId: session ? session.id : ''
+      sessionId: session ? session.id : '',
+      entryPhoto: snapshot || ''
     }
     // Instant one-click logging: record the trade immediately, no dialog.
     // The dialog is reserved for closing/editing via the Close button.

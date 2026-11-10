@@ -45,7 +45,17 @@
     // first configured instrument. Editing keeps the trade's own symbol.
     const selectedInstrument=trade.symbol||goldInstrument()||instruments[0];symbol.innerHTML=instruments.length?instruments.map(item=>`<option value="${safe(item)}">${safe(item)}</option>`).join(''):'<option value="">Add instruments in Settings first</option>';if(instruments.includes(selectedInstrument))symbol.value=selectedInstrument;else if(trade.symbol){symbol.insertAdjacentHTML('beforeend',`<option value="${safe(trade.symbol)}">${safe(trade.symbol)} (not in settings)</option>`);symbol.value=trade.symbol}const selectedSession=trade.sessionId||session.value;session.innerHTML='<option value="">No session</option>'+sessions.map(item=>`<option value="${safe(item.id)}">${safe(item.name)} (${safe(item.start)}–${safe(item.end)})</option>`).join('');if(selectedSession&&!sessions.some(item=>item.id===selectedSession)&&trade.sessionName)session.insertAdjacentHTML('beforeend',`<option value="${safe(trade.sessionId)}">${safe(trade.sessionName)} (removed)</option>`);if(selectedSession)session.value=selectedSession};
   let trades; try{trades=JSON.parse(localStorage.getItem('luxTradeJournalTrades')||'null')||seed}catch{trades=seed}
-  const persist=()=>{try{localStorage.setItem('luxTradeJournalTrades',JSON.stringify(trades))}catch{alert('Storage is full. Try removing large trade photos.')}};
+  // Chart snapshots are large, so a full store can reject the write. Rather
+  // than losing the trade, drop the oldest snapshots and save again.
+  const persist=()=>{
+    const write=()=>localStorage.setItem('luxTradeJournalTrades',JSON.stringify(trades));
+    try{write();return}catch{}
+    const withShots=trades.filter(trade=>trade.entryPhoto||trade.exitPhoto).sort((a,b)=>String(a.entryDate||'').localeCompare(String(b.entryDate||'')));
+    if(!withShots.length){alert('Storage is full. Try removing large trade photos.');return}
+    const trimmed=withShots.slice(0,Math.max(4,Math.ceil(withShots.length/4)));
+    trimmed.forEach(trade=>{trade.entryPhoto='';trade.exitPhoto=''});
+    try{write();alert(`Storage was full, so the chart snapshots on your ${trimmed.length} oldest trade${trimmed.length===1?'':'s'} were removed to keep saving.`)}catch{alert('Storage is full. Try removing large trade photos.')}
+  };
   const dashboardCards=[
     {id:'net-pnl',title:'Net P&L',description:'Net result across all recorded trades.'},
     {id:'win-rate',title:'Trade win %',description:'Winning trades as a share of all trades.'},
@@ -148,14 +158,14 @@
   $('#confirmDeleteTrades').onclick=()=>{trades=[];persist();deleteTradesDialog.close();render();window.dispatchEvent(new Event('gzs:trades-changed'));$('#clearData')?.focus()};
   function openTrade(t={}){form.reset();refreshTradeOptions(t);$('#tradeId').value=t.id||'';$('#formTitle').textContent=t.id?'Edit trade':'Add a trade';$('#deleteTradeBtn').hidden=!t.id;['symbol','direction','entryDate','exitDate','entryPrice','exitPrice','quantity','pnl','strategy','tags','notes','commission','swap','fees','pips'].forEach(k=>{let el=$('#'+k);if(k==='pips')el=$('#tradePips');if(el)el.value=(k==='entryPrice'||k==='exitPrice')?(t[k]===''||t[k]==null?'':Number(t[k]).toFixed(2)):(t[k]??(k==='direction'?'Long':k==='quantity'?.01:''))});photoValues={entryPhoto:t.entryPhoto||'',exitPhoto:t.exitPhoto||''};['entry','exit'].forEach(k=>{let img=$('#'+k+'Preview');img.src=photoValues[k+'Photo']||'';img.hidden=!photoValues[k+'Photo'];$('#'+k+'Photo').value=''});dlg.showModal();autoCalcClose();resetLookups();if(t.__focus==='strategy')setTimeout(()=>$('#strategy')?.focus(),60)}
   $('#newTradeBtn').onclick=()=>openTrade();$('#closeDialog').onclick=$('#cancelTrade').onclick=()=>dlg.close();
-  function addTradeFromChart(t={}){const session=sessions.find(item=>item.id===t.sessionId);const trade={id:'trade_'+Date.now(),symbol:t.symbol||instruments[0]||'',direction:t.direction||'Long',entryDate:t.entryDate||`${localDate()}T${localTime()}`,exitDate:'',entryPrice:t.entryPrice===''||t.entryPrice==null?'':Number(t.entryPrice),exitPrice:'',quantity:Number(t.quantity||0.01),pnl:0,strategy:'',tags:'',notes:'',sessionId:session?.id||t.sessionId||'',sessionName:session?.name||t.sessionName||'',sessionColor:session?.color||t.sessionColor||'',commission:0,swap:0,fees:0,pips:'',status:'open'};trades.push(trade);persist();window.dispatchEvent(new Event('gzs:trades-changed'))}
+  function addTradeFromChart(t={}){const session=sessions.find(item=>item.id===t.sessionId);const trade={id:'trade_'+Date.now(),symbol:t.symbol||instruments[0]||'',direction:t.direction||'Long',entryDate:t.entryDate||`${localDate()}T${localTime()}`,exitDate:'',entryPrice:t.entryPrice===''||t.entryPrice==null?'':Number(t.entryPrice),exitPrice:'',quantity:Number(t.quantity||0.01),pnl:0,strategy:'',tags:'',notes:'',sessionId:session?.id||t.sessionId||'',sessionName:session?.name||t.sessionName||'',sessionColor:session?.color||t.sessionColor||'',commission:0,swap:0,fees:0,pips:'',status:'open',entryPhoto:t.entryPhoto||'',exitPhoto:''};trades.push(trade);persist();window.dispatchEvent(new Event('gzs:trades-changed'))}
   // --- Instant close from the chart (no dialog) ------------------------------
   // Closing saves the closing details straight away: exit price = the live
   // quote handed over by the chart, exit time = now, pips/gross/net computed
   // with the same XAUUSD engine as the open-trades panel, status set to
   // Closed. Returns false when no usable price was supplied so the caller can
   // fall back to the manual dialog instead of inventing a price.
-  async function closeTradeFromChart(id, livePrice){
+  async function closeTradeFromChart(id, livePrice, snapshot){
     const trade=trades.find(item=>item.id===id);
     if(!trade) return false;
     const price=Number(livePrice);
@@ -173,6 +183,8 @@
       trade.pips=Number(pips.toFixed(1));
       trade.pnl=Number(net.toFixed(2));
       trade.status='closed';
+      // keep the chart picture from the moment the trade was closed
+      if(snapshot) trade.exitPhoto=snapshot;
       persist();
       window.dispatchEvent(new Event('gzs:trades-changed'));
       return true;
