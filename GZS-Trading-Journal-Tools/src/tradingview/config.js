@@ -12,6 +12,7 @@ export const CHART_CONFIG = {
   watchlist: [
     'FXPRO:XAUUSD',
     'FXPRO:XAGUSD',
+    'OANDA:BTCUSD',
     'OANDA:NAS100USD',
     'OANDA:UK100GBP',
     'OANDA:US30USD'
