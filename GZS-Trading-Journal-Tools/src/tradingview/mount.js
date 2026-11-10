@@ -64,7 +64,48 @@ const INTERVALS = [
 
 const SYMBOL_KEY = 'luxTVSymbol'
 const INTERVAL_KEY = 'luxTVInterval'
+// One record for the whole chart view: the symbol you were on and the
+// timeframe you last used *per symbol* (XAUUSD on 5m, NAS100 on 1H, ...).
+const VIEW_KEY = 'gzs.tv.view'
 const POLL_MS = 10 * 1000
+
+/**
+ * Read the remembered chart view.
+ *
+ * TradingView's embed widget keeps its own colours/scales in the iframe, but
+ * it forgets the symbol and timeframe between visits, so those live here.
+ * Older builds stored them in two flat keys — still honoured on first run.
+ */
+function readView() {
+  const legacySymbol = localStorage.getItem(SYMBOL_KEY) || ''
+  const legacyInterval = localStorage.getItem(INTERVAL_KEY) || ''
+  let stored = null
+  try {
+    stored = JSON.parse(localStorage.getItem(VIEW_KEY) || 'null')
+  } catch {
+    stored = null
+  }
+  const intervals = stored && stored.intervals && typeof stored.intervals === 'object' ? stored.intervals : {}
+  const symbol =
+    (stored && typeof stored.symbol === 'string' && stored.symbol) || legacySymbol || CHART_CONFIG.symbol
+  const interval = intervals[symbol] || legacyInterval || CHART_CONFIG.interval
+  return { symbol, interval, intervals: { ...intervals } }
+}
+
+/** Persist the chart view, keeping the legacy keys in sync for older code. */
+function saveView(state) {
+  const payload = {
+    symbol: state.symbol,
+    intervals: { ...state.intervals, [state.symbol]: state.interval }
+  }
+  try {
+    localStorage.setItem(VIEW_KEY, JSON.stringify(payload))
+    localStorage.setItem(SYMBOL_KEY, state.symbol)
+    localStorage.setItem(INTERVAL_KEY, state.interval)
+  } catch {
+    /* storage full or blocked — the chart still works, it just won't remember */
+  }
+}
 
 function journalSymbolFor(tvSymbol) {
   if (TV_ALIASES[tvSymbol]) return TV_ALIASES[tvSymbol]
@@ -192,6 +233,7 @@ function buildActivePanel(panel) {
   // With no open trades, only the Buy/Sell buttons remain — hide the panel
   panel.hidden = open.length === 0
   if (open.length === 0) {
+    if (state.endHold) state.endHold()
     state.onOpenChanged && state.onOpenChanged([])
     return
   }
@@ -254,8 +296,11 @@ function buildActivePanel(panel) {
       if (price != null && state.closeTrade) {
         btn.disabled = true
         btn.textContent = '…'
+        // keep the open-trades list visible across the row rebuild
+        if (state.holdPanelOpen) state.holdPanelOpen()
         const closed = await state.closeTrade(trade.id, price)
         if (closed) return // row disappears via gzs:trades-changed
+        if (state.endHold) state.endHold()
         btn.disabled = false
         btn.textContent = 'Close'
       }
@@ -368,9 +413,11 @@ async function updateLiveValues(panel) {
 export function mountTradingView(host, api = {}) {
   if (!host) return
 
+  const view = readView()
   const state = {
-    symbol: localStorage.getItem(SYMBOL_KEY) || CHART_CONFIG.symbol,
-    interval: localStorage.getItem(INTERVAL_KEY) || CHART_CONFIG.interval,
+    symbol: view.symbol,
+    interval: view.interval,
+    intervals: view.intervals,
     openTrade: typeof api.openTrade === 'function' ? api.openTrade : null,
     addTrade: typeof api.addTrade === 'function' ? api.addTrade : null,
     closeTrade: typeof api.closeTrade === 'function' ? api.closeTrade : null,
@@ -386,9 +433,6 @@ export function mountTradingView(host, api = {}) {
             <select id="tvSymbolSelect" class="tv-symbol-select" aria-label="Chart symbol"></select>
           </label>
           <div class="tv-intervals" id="tvIntervals" role="group" aria-label="Chart interval"></div>
-        </div>
-        <div class="tv-main">
-          <section class="tv-panel tv-chart" id="tvChart" aria-label="Price chart"></section>
           <div class="tv-overlay">
             <div class="tv-quick">
               <button type="button" id="tvSell" class="tv-trade-btn tv-sell" title="Log a Short trade for this symbol">▼ Sell</button>
@@ -416,6 +460,9 @@ export function mountTradingView(host, api = {}) {
             </div>
           </div>
         </div>
+        <div class="tv-main">
+          <section class="tv-panel tv-chart" id="tvChart" aria-label="Price chart"></section>
+        </div>
       </div>
     `
   }
@@ -431,12 +478,22 @@ export function mountTradingView(host, api = {}) {
     .join('')
   if (![...select.options].some((o) => o.value === state.symbol)) {
     state.symbol = CHART_CONFIG.symbol
-    localStorage.setItem(SYMBOL_KEY, state.symbol)
+    state.interval = state.intervals[state.symbol] || CHART_CONFIG.interval
+    saveView(state)
   }
   select.value = state.symbol
+  saveView(state)
+
+  // Each symbol keeps its own timeframe: switching to NAS100 and back to
+  // XAUUSD returns you to 5m, not to whatever the other symbol used.
   select.onchange = () => {
-    state.symbol = select.value
-    localStorage.setItem(SYMBOL_KEY, state.symbol)
+    const next = select.value
+    if (!next || next === state.symbol) return
+    state.intervals[state.symbol] = state.interval
+    state.symbol = next
+    state.interval = state.intervals[next] || CHART_CONFIG.interval
+    saveView(state)
+    syncIntervals()
     refresh()
   }
 
@@ -445,11 +502,19 @@ export function mountTradingView(host, api = {}) {
   intervalWrap.innerHTML = INTERVALS.map(
     ([val, label]) => `<button type="button" class="tv-interval${val === state.interval ? ' active' : ''}" data-interval="${val}">${label}</button>`
   ).join('')
+
+  function syncIntervals() {
+    intervalWrap.querySelectorAll('.tv-interval').forEach((b) => {
+      b.classList.toggle('active', b.dataset.interval === state.interval)
+    })
+  }
+
   intervalWrap.querySelectorAll('.tv-interval').forEach((btn) => {
     btn.onclick = () => {
       state.interval = btn.dataset.interval
-      localStorage.setItem(INTERVAL_KEY, state.interval)
-      intervalWrap.querySelectorAll('.tv-interval').forEach((b) => b.classList.toggle('active', b === btn))
+      state.intervals[state.symbol] = state.interval
+      saveView(state)
+      syncIntervals()
       refresh()
     }
   })
@@ -509,9 +574,63 @@ export function mountTradingView(host, api = {}) {
   }
 
   panel.addEventListener('mouseenter', () => setPanelOpen(true))
-  panel.addEventListener('mouseleave', () => setPanelOpen(false))
+
+  // Closing a trade rebuilds the rows, which makes the browser fire a
+  // synthetic mouseleave/focusout even though the pointer never moved away —
+  // and the shrunken panel can leave the pointer outside its new box. Both
+  // used to collapse the list right after a Close click. While a hold is
+  // active the list stays open, and it collapses again as soon as the pointer
+  // genuinely leaves the panel.
+  let holdTimer = null
+
+  function pointerInside(x, y) {
+    const r = panel.getBoundingClientRect()
+    return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom
+  }
+
+  function endHold() {
+    state.holdOpen = false
+    if (holdTimer) { clearTimeout(holdTimer); holdTimer = null }
+  }
+
+  /**
+   * Keep the list open across the rebuild that follows a Close click.
+   * Removing a row shrinks the panel, so the pointer can end up outside its
+   * new box and the browser fires a mouseleave — which used to collapse the
+   * list immediately, hiding the trades that were still open. That leave is
+   * ignored for a grace period; if the pointer isn't over the list when the
+   * grace period ends, it collapses as usual.
+   */
+  function holdPanelOpen() {
+    state.holdOpen = true
+    setPanelOpen(true)
+    if (holdTimer) clearTimeout(holdTimer)
+    holdTimer = setTimeout(() => {
+      holdTimer = null
+      state.holdOpen = false
+      // stay open while the pointer is actually over the list
+      if (!state.pointerOverPanel) setPanelOpen(false)
+    }, 3000)
+  }
+  state.holdPanelOpen = holdPanelOpen
+  state.endHold = endHold
+  state.holdOpen = false
+  state.pointerOverPanel = false
+
+  panel.addEventListener('mouseenter', () => {
+    state.pointerOverPanel = true
+    endHold() // back over the list — normal hover behaviour from here
+    setPanelOpen(true)
+  })
+  panel.addEventListener('mouseleave', (e) => {
+    state.pointerOverPanel = pointerInside(e.clientX, e.clientY)
+    if (state.pointerOverPanel) return // rows shifted under the cursor
+    if (state.holdOpen) return // grace period after a close decides
+    setPanelOpen(false)
+  })
   panel.addEventListener('focusin', () => setPanelOpen(true))
   panel.addEventListener('focusout', () => {
+    if (state.holdOpen) return
     if (!panel.contains(document.activeElement)) setPanelOpen(false)
   })
   applyPanelState()

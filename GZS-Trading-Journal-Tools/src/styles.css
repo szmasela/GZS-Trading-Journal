@@ -219,3 +219,11 @@ select option:checked,select option:hover{background:#1b302d;color:#f4f4f4}
 .form-grid select option:checked{background:#1b302d}
 .light-mode select option,.light-mode select optgroup{background:#f7f9fb;color:var(--text)}
 .light-mode select option:checked,.light-mode select option:hover{background:#e2f8ef;color:#0b0b0b}
+
+/* --- Past trades: whole row opens the trade details dialog ---------------- */
+tbody tr.trade-row{cursor:pointer}
+tbody tr.trade-row:hover{background:#1c2734}
+tbody tr.trade-row:active{background:#22303f}
+tbody tr.trade-row:focus-visible{outline:1px solid var(--blue);outline-offset:-2px}
+.light-mode tbody tr.trade-row:hover{background:#eef4fb}
+.light-mode tbody tr.trade-row:active{background:#e4eefa}
