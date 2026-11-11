@@ -471,6 +471,7 @@ export function mountTradingView(host, api = {}) {
             <select id="tvSymbolSelect" class="tv-symbol-select" aria-label="Chart symbol"></select>
           </label>
           <div class="tv-intervals" id="tvIntervals" role="group" aria-label="Chart interval"></div>
+          <button type="button" id="tvFullscreen" class="tv-icon-btn" aria-pressed="false" title="Full screen (F)" aria-label="Full screen chart">⛶</button>
           <div class="tv-overlay">
             <div class="tv-quick">
               <button type="button" id="tvSell" class="tv-trade-btn tv-sell" title="Log a Short trade for this symbol">▼ Sell</button>
@@ -556,6 +557,64 @@ export function mountTradingView(host, api = {}) {
       refresh()
     }
   })
+
+  // --- Full screen -----------------------------------------------------------
+  // The whole .tv-root goes full screen, not just the chart panel, so the
+  // symbol, timeframe and Buy/Sell controls stay reachable. Browsers can refuse
+  // the Fullscreen API (permissions, embedded frames), so falling back to a
+  // fixed-position class guarantees the button always does something.
+  const fullscreenBtn = body.querySelector('#tvFullscreen')
+  const isFullscreen = () => document.fullscreenElement === body || body.classList.contains('tv-focus')
+  function syncFullscreenButton() {
+    const on = isFullscreen()
+    fullscreenBtn.classList.toggle('active', on)
+    fullscreenBtn.setAttribute('aria-pressed', String(on))
+    fullscreenBtn.title = on ? 'Exit full screen (F)' : 'Full screen (F)'
+    fullscreenBtn.setAttribute('aria-label', on ? 'Exit full screen' : 'Full screen chart')
+  }
+  function exitFocusMode() {
+    body.classList.remove('tv-focus')
+    syncFullscreenButton()
+  }
+  async function toggleFullscreen() {
+    if (document.fullscreenElement === body) {
+      try { await document.exitFullscreen() } catch { /* already gone */ }
+      return
+    }
+    if (body.classList.contains('tv-focus')) { exitFocusMode(); return }
+    try {
+      await body.requestFullscreen()
+      return
+    } catch { /* fall through to the CSS fallback */ }
+    body.classList.add('tv-focus')
+    syncFullscreenButton()
+  }
+  fullscreenBtn.onclick = () => toggleFullscreen()
+  if (!body.dataset.fullscreenBound) {
+    body.dataset.fullscreenBound = '1'
+    document.addEventListener('fullscreenchange', () => {
+      if (!document.fullscreenElement) body.classList.remove('tv-focus')
+      syncFullscreenButton()
+    })
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        // Browsers normally leave full screen on Esc themselves; doing it here
+        // too keeps the button state honest in every environment.
+        if (body.classList.contains('tv-focus')) { exitFocusMode(); return }
+        if (document.fullscreenElement === body) { e.preventDefault(); document.exitFullscreen().catch(() => {}) }
+        return
+      }
+      if (e.key !== 'f' && e.key !== 'F') return
+      if (e.ctrlKey || e.metaKey || e.altKey) return
+      const tag = String(e.target.tagName || '').toLowerCase()
+      if (tag === 'input' || tag === 'textarea' || tag === 'select' || e.target.isContentEditable) return
+      // Only while the chart page is on screen.
+      if (!document.querySelector('.app-shell.tradingview-open')) return
+      e.preventDefault()
+      toggleFullscreen()
+    })
+  }
+  syncFullscreenButton()
 
   // --- Buy / Sell quick-log buttons ------------------------------------------
   // Prefill entry price from the live feed (XAUUSD) and auto-detect the

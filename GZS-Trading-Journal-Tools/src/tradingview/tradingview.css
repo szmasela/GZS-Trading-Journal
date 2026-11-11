@@ -605,3 +605,48 @@
 @media (max-width: 900px) {
   .tv-overlay { width: 452px; }
 }
+
+/* ---------------- full screen ---------------- */
+/* Sits in the topbar's flow right after the timeframe buttons: the trade
+   overlay is pinned at left:585, so this slot never collides with it. */
+.tv-icon-btn {
+  appearance: none;
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 1px solid var(--tv-line);
+  border-radius: 8px;
+  background: var(--tv-panel, #0e141b);
+  color: var(--tv-muted, #8b98ad);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  transition: color .12s ease, background .12s ease, border-color .12s ease;
+}
+
+.tv-icon-btn:hover { color: var(--tv-text); border-color: #3a4757; }
+
+.tv-icon-btn.active {
+  color: #71e6bd;
+  background: #1b302d;
+  border-color: rgba(67, 217, 167, .45);
+}
+
+/* Native full screen: the element becomes the viewport, so the flex column
+   has to be told to fill it. */
+.tv-root:fullscreen,
+.tv-root.tv-focus {
+  width: 100vw;
+  height: 100vh;
+  background: var(--tv-bg);
+}
+
+/* Fallback when the browser refuses requestFullscreen(). */
+.tv-root.tv-focus {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+}
