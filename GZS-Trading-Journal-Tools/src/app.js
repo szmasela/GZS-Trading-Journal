@@ -211,6 +211,81 @@ setTokenGetter(getSessionToken);
   }
   async function readPhoto(file){if(!file)return '';if(file.size>2*1024*1024){alert('Please choose an image smaller than 2 MB to keep local storage reliable.');return ''}return new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(r.result);r.onerror=reject;r.readAsDataURL(file)})}
   ['entry','exit'].forEach(k=>$('#'+k+'Photo').addEventListener('change',async e=>{const value=await readPhoto(e.target.files[0]);if(value){photoValues[k+'Photo']=value;const img=$('#'+k+'Preview');img.src=value;img.hidden=false}}));
+  // --- Photo gallery --------------------------------------------------------
+  // Both snapshots of a trade open in one viewer, so entry and exit can be
+  // compared without leaving the dialog. Sources: the trade dialog's previews
+  // and the thumbnails in the journal table.
+  const photoGallery=$('#photoGallery'),galleryImage=$('#photoGalleryImage'),galleryThumbs=$('#photoGalleryThumbs');
+  const PHOTO_META={entryPhoto:{label:'Entry photo',hint:'Before / at entry'},exitPhoto:{label:'Exit photo',hint:'After / at exit'}};
+  let galleryShots=[],galleryIndex=0;
+  const tradeShots=trade=>['entryPhoto','exitPhoto'].filter(key=>trade&&trade[key]).map(key=>({key,label:PHOTO_META[key].label,hint:PHOTO_META[key].hint,src:trade[key]}));
+  function showGalleryShot(){
+    const shot=galleryShots[galleryIndex];
+    if(!shot)return;
+    galleryImage.src=shot.src;
+    galleryImage.alt=`${shot.label} — ${shot.hint}`;
+    $('#photoGalleryTitle').textContent=shot.label;
+    $('#photoGalleryHint').textContent=shot.hint;
+    $('#photoGalleryCount').textContent=galleryShots.length>1?`${galleryIndex+1} of ${galleryShots.length}`:'';
+    const many=galleryShots.length>1;
+    $('#photoGalleryPrev').hidden=!many;
+    $('#photoGalleryNext').hidden=!many;
+    [...galleryThumbs.children].forEach((button,index)=>{const active=index===galleryIndex;button.classList.toggle('active',active);button.setAttribute('aria-current',active?'true':'false')});
+  }
+  function stepGallery(delta){
+    if(galleryShots.length<2)return;
+    galleryIndex=(galleryIndex+delta+galleryShots.length)%galleryShots.length;
+    showGalleryShot();
+  }
+  function openGallery(shots,index=0){
+    galleryShots=(shots||[]).filter(shot=>shot&&shot.src);
+    if(!galleryShots.length)return;
+    galleryIndex=Math.max(0,Math.min(index<0?0:index,galleryShots.length-1));
+    galleryThumbs.replaceChildren(...galleryShots.map((shot,position)=>{
+      const button=document.createElement('button');
+      button.type='button';
+      button.className='photo-gallery-thumb';
+      button.setAttribute('aria-label',`Show ${shot.label}`);
+      const thumb=document.createElement('img');
+      thumb.src=shot.src;
+      thumb.alt='';
+      button.append(thumb);
+      button.onclick=()=>{galleryIndex=position;showGalleryShot()};
+      return button;
+    }));
+    galleryThumbs.hidden=galleryShots.length<2;
+    showGalleryShot();
+    if(!photoGallery.open)photoGallery.showModal();
+  }
+  $('#photoGalleryClose').onclick=()=>photoGallery.close();
+  $('#photoGalleryPrev').onclick=()=>stepGallery(-1);
+  $('#photoGalleryNext').onclick=()=>stepGallery(1);
+  photoGallery.addEventListener('keydown',event=>{
+    if(event.key==='ArrowLeft'){event.preventDefault();stepGallery(-1)}
+    else if(event.key==='ArrowRight'){event.preventDefault();stepGallery(1)}
+  });
+  // Clicking the dimmed stage (not the photo itself) dismisses the viewer.
+  $('#photoGalleryStage').addEventListener('click',event=>{if(event.target.id==='photoGalleryStage')photoGallery.close()});
+  // The previews live inside the file-input label, so a click has to be
+  // swallowed or the OS file picker opens behind the gallery.
+  ['entry','exit'].forEach(kind=>$('#'+kind+'Preview').addEventListener('click',event=>{
+    event.preventDefault();
+    event.stopPropagation();
+    if(!photoValues[kind+'Photo'])return;
+    const shots=tradeShots(photoValues);
+    openGallery(shots,shots.findIndex(shot=>shot.key===kind+'Photo'));
+  }));
+  // Journal rows: the thumbnail opens the same viewer instead of the trade.
+  document.addEventListener('click',event=>{
+    const thumb=event.target.closest&&event.target.closest('.photo-pair img');
+    if(!thumb)return;
+    const row=thumb.closest('tr.trade-row'),trade=row&&trades.find(item=>item.id===row.dataset.id);
+    if(!trade)return;
+    event.preventDefault();
+    event.stopPropagation();
+    const shots=tradeShots(trade);
+    openGallery(shots,shots.findIndex(shot=>shot.src===thumb.getAttribute('src')));
+  },true);
   form.onsubmit=async e=>{e.preventDefault();let id=$('#tradeId').value||('trade_'+Date.now());const selectedSession=sessions.find(item=>item.id===$('#tradeSession').value);const previousTrade=trades.find(item=>item.id===id);const t={id,symbol:$('#symbol').value,direction:$('#direction').value,entryDate:$('#entryDate').value,exitDate:$('#exitDate').value,entryPrice:$('#entryPrice').value===''?'':Number($('#entryPrice').value),exitPrice:$('#exitPrice').value===''?'':Number($('#exitPrice').value),quantity:Number($('#quantity').value||0),pnl:Number($('#pnl').value||0),strategy:$('#strategy').value.trim(),tags:$('#tags').value.trim(),notes:$('#notes').value.trim(),sessionId:selectedSession?.id||'',sessionName:selectedSession?.name||($('#tradeSession').value?previousTrade?.sessionName||'':''),sessionColor:selectedSession?.color||($('#tradeSession').value?previousTrade?.sessionColor||'':''),...photoValues,commission:Number($('#commission').value||0),swap:Number($('#swap').value||0),fees:Number($('#fees').value||0),pips:$('#tradePips').value===''?'':Number($('#tradePips').value),status:($('#exitPrice').value!==''||$('#exitDate').value)?'closed':'open'};const i=trades.findIndex(x=>x.id===id);if(i>=0)trades[i]=t;else trades.push(t);persist();dlg.close();render();window.dispatchEvent(new Event('gzs:trades-changed'))};
   $('#deleteTradeBtn').onclick=()=>{let id=$('#tradeId').value;if(confirm('Delete this trade permanently?')){trades=trades.filter(t=>t.id!==id);persist();dlg.close();render();window.dispatchEvent(new Event('gzs:trades-changed'))}};
   // --- Past trades open their details on click -------------------------------
@@ -252,7 +327,9 @@ setTokenGetter(getSessionToken);
   }
   document.addEventListener('click',e=>{
     if(Date.now()-dialogOpenedAt<200) return;
-    const open=document.querySelector('dialog[open]');
+    // Topmost dialog only: the photo gallery opens on top of the trade dialog,
+    // and a click past the gallery must close the gallery, not the form under it.
+    const open=[...document.querySelectorAll('dialog[open]')].pop();
     if(!open) return;
     const rect=open.getBoundingClientRect();
     const inside=e.clientX>=rect.left&&e.clientX<=rect.right&&e.clientY>=rect.top&&e.clientY<=rect.bottom;

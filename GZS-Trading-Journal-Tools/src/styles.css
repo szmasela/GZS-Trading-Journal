@@ -227,3 +227,41 @@ tbody tr.trade-row:active{background:#22303f}
 tbody tr.trade-row:focus-visible{outline:1px solid var(--blue);outline-offset:-2px}
 .light-mode tbody tr.trade-row:hover{background:#eef4fb}
 .light-mode tbody tr.trade-row:active{background:#e4eefa}
+
+/* --- Photo gallery --------------------------------------------------------
+   One viewer for both snapshots of a trade. Opens on top of the trade dialog
+   and from the thumbnails in the journal table. ------------------------- */
+.photo-preview,
+.photo-pair img{cursor:zoom-in}
+.photo-preview:hover,
+.photo-pair img:hover{filter:brightness(1.12)}
+.photo-preview:focus-visible,
+.photo-pair img:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+.photo-gallery{width:min(1120px,100vw - 24px);height:min(88vh,840px);max-height:calc(100vh - 24px);overflow:hidden;padding:0}
+.photo-gallery-shell{display:flex;flex-direction:column;height:100%;min-height:0}
+.photo-gallery-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;padding:16px 18px;border-bottom:1px solid var(--line)}
+.photo-gallery-head h2{margin:6px 0 0;font-size:17px}
+.photo-gallery-head small{display:block;margin-top:4px;color:var(--muted);font-size:11px}
+.photo-gallery-head-right{display:flex;align-items:center;gap:10px}
+.photo-gallery-count{color:var(--muted);font-size:11px;font-variant-numeric:tabular-nums}
+.photo-gallery-stage{position:relative;flex:1;min-height:0;display:grid;place-items:center;padding:14px;background:color-mix(in srgb, var(--bg) 90%, #000)}
+.photo-gallery-image{max-width:100%;max-height:100%;object-fit:contain;border-radius:8px;border:1px solid var(--line);background:#0a0a0c}
+.photo-gallery-nav{position:absolute;top:50%;transform:translateY(-50%);display:grid;place-items:center;width:40px;height:40px;border-radius:999px;border:1px solid var(--line);background:color-mix(in srgb, var(--panel) 84%, transparent);color:var(--text);font-size:22px;line-height:1;cursor:pointer}
+.photo-gallery-nav:hover{background:var(--panel2)}
+.photo-gallery-nav[hidden]{display:none}
+.photo-gallery-nav.prev{left:10px}
+.photo-gallery-nav.next{right:10px}
+.photo-gallery-thumbs{display:flex;gap:8px;padding:12px 18px 16px;border-top:1px solid var(--line);overflow-x:auto}
+.photo-gallery-thumbs[hidden]{display:none}
+.photo-gallery-thumb{flex:none;width:104px;height:64px;padding:0;overflow:hidden;border:1px solid var(--line);border-radius:8px;background:var(--panel2);opacity:.6;cursor:pointer}
+.photo-gallery-thumb img{display:block;width:100%;height:100%;object-fit:cover}
+.photo-gallery-thumb:hover{opacity:1}
+.photo-gallery-thumb.active{opacity:1;border-color:var(--green);box-shadow:0 0 0 1px var(--green)}
+.photo-gallery-thumb:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+.light-mode .photo-gallery-stage{background:#eef1f4}
+@media (max-width:600px){
+  .photo-gallery{width:calc(100vw - 12px);height:calc(100vh - 24px);max-height:none}
+  .photo-gallery-head{padding:12px 14px}
+  .photo-gallery-thumbs{padding:10px 14px 12px}
+  .photo-gallery-thumb{width:84px;height:54px}
+}

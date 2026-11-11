@@ -199,6 +199,28 @@
       </form>
     </dialog>
 
+    <dialog id="photoGallery" class="photo-gallery" aria-labelledby="photoGalleryTitle">
+      <div class="photo-gallery-shell">
+        <div class="photo-gallery-head">
+          <div>
+            <span class="eyebrow">TRADE PHOTOS</span>
+            <h2 id="photoGalleryTitle">Entry photo</h2>
+            <small id="photoGalleryHint">Before / at entry</small>
+          </div>
+          <div class="photo-gallery-head-right">
+            <span class="photo-gallery-count" id="photoGalleryCount"></span>
+            <button type="button" class="icon-btn" id="photoGalleryClose" aria-label="Close photo gallery">×</button>
+          </div>
+        </div>
+        <div class="photo-gallery-stage" id="photoGalleryStage">
+          <button type="button" class="photo-gallery-nav prev" id="photoGalleryPrev" aria-label="Previous photo">‹</button>
+          <img id="photoGalleryImage" class="photo-gallery-image" alt="" />
+          <button type="button" class="photo-gallery-nav next" id="photoGalleryNext" aria-label="Next photo">›</button>
+        </div>
+        <div class="photo-gallery-thumbs" id="photoGalleryThumbs"></div>
+      </div>
+    </dialog>
+
     <dialog id="deleteTradesDialog" class="confirmation-dialog" aria-labelledby="deleteTradesTitle" aria-describedby="deleteTradesDescription">
       <div class="confirmation-content">
         <span class="eyebrow">DELETE JOURNAL ENTRIES</span>
