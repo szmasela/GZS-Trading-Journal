@@ -149,7 +149,9 @@ on conflict (id) do update set
   pips = excluded.pips,
   status = excluded.status,
   updated_at = now()
-where trades.user_id = excluded.user_id`
+where trades.user_id = excluded.user_id
+  -- A tombstoned trade is never revived by a stale client re-uploading it.
+  and trades.deleted_at is null`
 
 const TRADE_SELECT = `
 select id, symbol, direction,
@@ -167,7 +169,7 @@ select id, symbol, direction,
        pips::float8 as pips,
        status
 from trades
-where user_id = $1
+where user_id = $1 and deleted_at is null
 order by entry_at desc nulls last, created_at desc`
 
 function toTrade(row, photos) {
@@ -210,7 +212,7 @@ async function readTrades(userId) {
       `select s.trade_id, s.kind, s.data_url
          from trade_snapshots s
          join trades t on t.id = s.trade_id
-        where t.user_id = $1`,
+        where t.user_id = $1 and t.deleted_at is null`,
       [userId],
     ),
   ])
@@ -223,6 +225,44 @@ async function readTrades(userId) {
   }
 
   return rows.map((row) => toTrade(row, photosByTrade.get(row.id)))
+}
+
+/**
+ * Every tombstone for this user. The client uses the ids to drop cached
+ * trades that were deleted on another device.
+ */
+async function readTombstones(userId) {
+  const rows = await query(
+    `select id, deleted_at
+       from trades
+      where user_id = $1 and deleted_at is not null
+      order by deleted_at desc`,
+    [userId],
+  )
+  return rows.map((row) => ({ id: row.id, deletedAt: row.deleted_at }))
+}
+
+// Tombstones older than this are removed for real, along with their snapshots.
+const PURGE_AFTER_DAYS = 30
+const PURGE_INTERVAL_MS = 60 * 60 * 1000
+let lastPurgeAt = 0
+
+/** Reclaim tombstones past their retention window. Runs at most hourly. */
+async function purgeTombstones(userId) {
+  if (Date.now() - lastPurgeAt < PURGE_INTERVAL_MS) return 0
+  lastPurgeAt = Date.now()
+  const rows = await query(
+    `with gone as (
+       delete from trades
+        where user_id = $1
+          and deleted_at is not null
+          and deleted_at < now() - interval '${PURGE_AFTER_DAYS} days'
+        returning id
+     )
+     select count(*)::int as purged from gone`,
+    [userId],
+  )
+  return rows[0]?.purged ?? 0
 }
 
 async function readSettings(userId) {
@@ -313,7 +353,13 @@ async function writeTrades(userId, { upserts = [], deletes = [] } = {}) {
 
   for (const id of Array.isArray(deletes) ? deletes : []) {
     if (typeof id !== 'string' || !id) continue
-    await query('delete from trades where id = $1 and user_id = $2', [id, userId])
+    // Soft delete: the row becomes a tombstone so other devices can tell a
+    // deliberate deletion from a missing row. Purged after 30 days.
+    await query(
+      `update trades set deleted_at = now(), updated_at = now()
+        where id = $1 and user_id = $2 and deleted_at is null`,
+      [id, userId],
+    )
     removed += 1
   }
 
@@ -413,10 +459,11 @@ async function writeSettings(userId, body) {
 
 async function health(userId) {
   const row = await queryOne(
-    `select (select count(*) from trades where user_id = $1)::int as trades,
+    `select (select count(*) from trades where user_id = $1 and deleted_at is null)::int as trades,
+            (select count(*) from trades where user_id = $1 and deleted_at is not null)::int as deleted,
             (select count(*) from trade_snapshots s
                join trades t on t.id = s.trade_id
-              where t.user_id = $1)::int as snapshots,
+              where t.user_id = $1 and t.deleted_at is null)::int as snapshots,
             (select count(*) from instruments where user_id = $1)::int as instruments`,
     [userId],
   )
@@ -450,8 +497,12 @@ export function createJournalApi() {
       }
 
       if (route === '/api/journal' && req.method === 'GET') {
-        const [trades, settings] = await Promise.all([readTrades(userId), readSettings(userId)])
-        send(res, 200, { ok: true, user: userId, trades, ...settings })
+        const [trades, deleted, settings] = await Promise.all([
+          readTrades(userId),
+          readTombstones(userId),
+          readSettings(userId),
+        ])
+        send(res, 200, { ok: true, user: userId, trades, deleted, ...settings })
         return
       }
 
@@ -459,7 +510,8 @@ export function createJournalApi() {
         const body = await readJson(req)
         await ensureUser(userId)
         const result = await writeTrades(userId, body)
-        send(res, 200, { ok: true, ...result })
+        const purged = await purgeTombstones(userId).catch(() => 0)
+        send(res, 200, { ok: true, ...result, purged })
         return
       }
 

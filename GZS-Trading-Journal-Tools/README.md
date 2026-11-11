@@ -53,4 +53,7 @@ For local testing without a Clerk session, start the dev server with `JOURNAL_DE
 - Writes go to `localStorage` first, so the UI never waits on the network.
 - `src/journalApi.js` diffs trades against the last accepted snapshot and sends only changed rows and deletions.
 - On boot the server's journal is adopted and cached locally. A non-empty local journal is never wiped by an empty server response, and the first sync for a new user uploads whatever is already in the browser.
-- Deletions propagate from the device that made them. There are no tombstones yet, so a device holding a stale cached copy can re-upload a deleted trade.
+- Deleting a trade writes a **tombstone** (`trades.deleted_at`) instead of removing the row. `GET /api/journal` returns those ids in `deleted`, and the client drops them from its cache, so a device that still holds an old copy cannot resurrect the trade. Tombstoned rows are purged after 30 days — by the API at most hourly, or on demand with `npm run db:purge` (pass a number of days to change the window).
+
+Soft delete keeps the trade's snapshots until the purge, so a tombstone still occupies its photo bytes for up to 30 days. That is the cost of being able to tell "deleted" from "missing".
+

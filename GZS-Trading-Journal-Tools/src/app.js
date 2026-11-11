@@ -382,6 +382,10 @@ setTokenGetter(getSessionToken)
     // Server wins, except that an empty server never wipes a non-empty local
     // journal — that would turn a failed sync into data loss.
     if(serverTrades.length)trades=serverTrades;
+    // Tombstones beat any cached copy: a trade deleted on another device must
+    // not come back from this browser's localStorage.
+    const tombstoned=new Set((Array.isArray(remote.deleted)?remote.deleted:[]).map(item=>item.id));
+    if(tombstoned.size)trades=trades.filter(trade=>!tombstoned.has(trade.id));
     if(Array.isArray(remote.instruments)&&remote.instruments.length)instruments=remote.instruments;
     if(Array.isArray(remote.sessions)&&remote.sessions.length)sessions=remote.sessions;
     if(Number.isFinite(remote.balanceBase))balanceBase=remote.balanceBase;

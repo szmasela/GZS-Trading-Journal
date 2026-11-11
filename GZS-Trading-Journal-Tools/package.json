@@ -8,7 +8,8 @@
     "build": "vite build",
     "preview": "vite preview --host 0.0.0.0 --port 5173",
     "db:check": "node server/db-check.mjs",
-    "db:migrate": "node db/migrate.mjs"
+    "db:migrate": "node db/migrate.mjs",
+    "db:purge": "node db/purge.mjs"
   },
   "devDependencies": {
     "vite": "^6.3.5"

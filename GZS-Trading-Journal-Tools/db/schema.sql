@@ -76,6 +76,18 @@ create index if not exists trades_user_entry_idx
   on trades (user_id, entry_at desc nulls last);
 --> statement-breakpoint
 
+-- Tombstones. Deleting a trade sets deleted_at instead of removing the row,
+-- so other devices learn that the deletion was deliberate and cannot
+-- resurrect the trade from their local cache. Rows are purged for real after
+-- 30 days (npm run db:purge).
+alter table trades add column if not exists deleted_at timestamptz;
+--> statement-breakpoint
+
+create index if not exists trades_deleted_idx
+  on trades (user_id, deleted_at)
+  where deleted_at is not null;
+--> statement-breakpoint
+
 -- Chart snapshots live in their own table: a 32 KB JPEG data URL per side
 -- would bloat every trade row, every backup and every list query. Keeping
 -- them separate means the trades table stays ~1 KB per row, and this table is
