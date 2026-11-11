@@ -19,6 +19,23 @@ import { Clerk } from '@clerk/clerk-js'
 
 const CLERK_PK = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY || ''
 
+// Kept module-level so the journal sync client can read the session token
+// without threading Clerk through every call site.
+let activeClerk = null
+
+/**
+ * Current Clerk session token, or '' when signed out or unconfigured.
+ * Never throws — callers treat '' as "no credentials".
+ * @returns {Promise<string>}
+ */
+export async function getSessionToken() {
+  try {
+    return (await activeClerk?.session?.getToken()) || ''
+  } catch {
+    return ''
+  }
+}
+
 // Derive the Frontend API domain from the publishable key (Clerk v6 pattern)
 function fapiDomain(pk) {
   try {
@@ -133,6 +150,7 @@ export async function initAuth(onReady) {
   try {
     await loadClerkUIBundle()
     clerk = new Clerk(CLERK_PK)
+    activeClerk = clerk
     await clerk.load({
       ui: { ClerkUI: window.__internal_ClerkUICtor }
     })

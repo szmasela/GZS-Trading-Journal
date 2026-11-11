@@ -1,3 +1,9 @@
+import { getSessionToken } from './auth.js'
+import { pull, pushTrades, prime, queueSettings, flushNow, setTokenGetter } from './journalApi.js'
+
+// auth.js owns Clerk; journalApi only needs a way to ask for the current token.
+setTokenGetter(getSessionToken)
+
 (() => {
   const $ = (s, root=document) => root.querySelector(s);
   const $$ = (s, root=document) => [...root.querySelectorAll(s)];
@@ -33,11 +39,11 @@
   const readBalanceAdjustments=()=>{try{const raw=localStorage.getItem(balanceAdjustmentsKey);if(raw===null)return[];const parsed=JSON.parse(raw);if(!Array.isArray(parsed))throw Error('Expected a list');return parsed.map(normalizeAdjustment).filter(Boolean)}catch(error){alert(`Could not load saved balance adjustments: ${error.message}`);return[]}};
   const readBalanceBase=()=>{try{const raw=localStorage.getItem(balanceBaseKey);if(raw===null)return 100;const value=Number(raw);if(!Number.isFinite(value))throw Error('Expected a valid balance amount');return value}catch(error){alert(`Could not load the saved base balance: ${error.message}`);return 100}};
   let balanceBase=readBalanceBase(),balanceAdjustments=readBalanceAdjustments();
-  const persistBalance=()=>{try{localStorage.setItem(balanceBaseKey,String(balanceBase));localStorage.setItem(balanceAdjustmentsKey,JSON.stringify(balanceAdjustments))}catch(error){alert(`Could not save balance adjustments: ${error.message}`)}};
+  const persistBalance=()=>{try{localStorage.setItem(balanceBaseKey,String(balanceBase));localStorage.setItem(balanceAdjustmentsKey,JSON.stringify(balanceAdjustments))}catch(error){alert(`Could not save balance adjustments: ${error.message}`)}queueSettings({balanceBase,balanceAdjustments})};
   const signedAdjustments=()=>balanceAdjustments.reduce((total,adjustment)=>total+(adjustment.type==='add'?adjustment.amount:-adjustment.amount),0);
   const localDate=()=>{const now=new Date();return `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`};
   const localTime=()=>{const now=new Date();return `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`};
-  const persistSettings=()=>{try{localStorage.setItem(instrumentKey,JSON.stringify(instruments));localStorage.setItem(sessionKey,JSON.stringify(sessions))}catch(error){alert(`Could not save settings: ${error.message}`)}};
+  const persistSettings=()=>{try{localStorage.setItem(instrumentKey,JSON.stringify(instruments));localStorage.setItem(sessionKey,JSON.stringify(sessions))}catch(error){alert(`Could not save settings: ${error.message}`)}queueSettings({instruments,sessions})};
   const newId=()=>globalThis.crypto?.randomUUID?.()||`item_${Date.now()}_${Math.random().toString(36).slice(2)}`;
   const goldInstrument=()=>instruments.find(item=>{const k=String(item||'').trim().toUpperCase().replace(/[^A-Z0-9]/g,'');return k==='XAUUSD'||k.startsWith('XAUUSD')||k==='GOLD'||k.startsWith('GOLD')})||'';
   const refreshTradeOptions=(trade={})=>{const symbol=$('#symbol'),session=$('#tradeSession');if(!symbol||!session)return;
@@ -47,14 +53,20 @@
   let trades; try{trades=JSON.parse(localStorage.getItem('luxTradeJournalTrades')||'null')||seed}catch{trades=seed}
   // Chart snapshots are large, so a full store can reject the write. Rather
   // than losing the trade, drop the oldest snapshots and save again.
+  // Every save is mirrored to Postgres in the background (journalApi); the
+  // local write stays authoritative so the journal works offline.
   const persist=()=>{
     const write=()=>localStorage.setItem('luxTradeJournalTrades',JSON.stringify(trades));
-    try{write();return}catch{}
-    const withShots=trades.filter(trade=>trade.entryPhoto||trade.exitPhoto).sort((a,b)=>String(a.entryDate||'').localeCompare(String(b.entryDate||'')));
-    if(!withShots.length){alert('Storage is full. Try removing large trade photos.');return}
-    const trimmed=withShots.slice(0,Math.max(4,Math.ceil(withShots.length/4)));
-    trimmed.forEach(trade=>{trade.entryPhoto='';trade.exitPhoto=''});
-    try{write();alert(`Storage was full, so the chart snapshots on your ${trimmed.length} oldest trade${trimmed.length===1?'':'s'} were removed to keep saving.`)}catch{alert('Storage is full. Try removing large trade photos.')}
+    const saveLocal=()=>{
+      try{write();return}catch{}
+      const withShots=trades.filter(trade=>trade.entryPhoto||trade.exitPhoto).sort((a,b)=>String(a.entryDate||'').localeCompare(String(b.entryDate||'')));
+      if(!withShots.length){alert('Storage is full. Try removing large trade photos.');return}
+      const trimmed=withShots.slice(0,Math.max(4,Math.ceil(withShots.length/4)));
+      trimmed.forEach(trade=>{trade.entryPhoto='';trade.exitPhoto=''});
+      try{write();alert(`Storage was full, so the chart snapshots on your ${trimmed.length} oldest trade${trimmed.length===1?'':'s'} were removed to keep saving.`)}catch{alert('Storage is full. Try removing large trade photos.')}
+    };
+    saveLocal();
+    pushTrades(trades);
   };
   const dashboardCards=[
     {id:'net-pnl',title:'Net P&L',description:'Net result across all recorded trades.'},
@@ -120,7 +132,7 @@
   let journalFilters={instrument:'all',direction:'all',session:'all'};
   const dashboardRangeForToday=()=>{const today=dateOnly(new Date()),date=new Date(`${today}T12:00:00`),to=dashboardRange.preset==='custom'?dashboardRange.to:today;let from=dashboardRange.preset==='custom'?dashboardRange.from:today;if(dashboardRange.preset==='7D'){date.setDate(date.getDate()-6);from=dateOnly(date)}else if(dashboardRange.preset==='1M')from=`${today.slice(0,7)}-01`;else if(dashboardRange.preset==='1Y')from=`${today.slice(0,4)}-01-01`;return{from,to}};
   const dashboardTradesForRange=()=>{const{from,to}=dashboardRangeForToday();return trades.filter(trade=>{const date=tradeDate(trade),sessionName=sessions.find(item=>item.id===trade.sessionId)?.name||trade.sessionName||'';return date&&date>=from&&date<=to&&(journalFilters.instrument==='all'||trade.symbol===journalFilters.instrument)&&(journalFilters.direction==='all'||trade.direction===journalFilters.direction)&&(journalFilters.session==='all'||sessionName===journalFilters.session)})};
-  const persistDashboardLayout=()=>{dashboardLayout.sizes=dashboardLayout.sizes&&typeof dashboardLayout.sizes==='object'&&!Array.isArray(dashboardLayout.sizes)?dashboardLayout.sizes:{};dashboardLayout.layouts=dashboardLayout.layouts&&typeof dashboardLayout.layouts==='object'&&!Array.isArray(dashboardLayout.layouts)?dashboardLayout.layouts:{};dashboardLayout.layouts[dashboardLayout.preset]={cards:dashboardLayout.cards.slice(),sizes:{...dashboardLayout.sizes}};try{localStorage.setItem(dashboardLayoutKey,JSON.stringify(dashboardLayout))}catch(error){alert(`Could not save the dashboard layout: ${error.message}`)}};
+  const persistDashboardLayout=()=>{dashboardLayout.sizes=dashboardLayout.sizes&&typeof dashboardLayout.sizes==='object'&&!Array.isArray(dashboardLayout.sizes)?dashboardLayout.sizes:{};dashboardLayout.layouts=dashboardLayout.layouts&&typeof dashboardLayout.layouts==='object'&&!Array.isArray(dashboardLayout.layouts)?dashboardLayout.layouts:{};dashboardLayout.layouts[dashboardLayout.preset]={cards:dashboardLayout.cards.slice(),sizes:{...dashboardLayout.sizes}};try{localStorage.setItem(dashboardLayoutKey,JSON.stringify(dashboardLayout))}catch(error){alert(`Could not save the dashboard layout: ${error.message}`)}queueSettings({dashboardLayout})};
   const totalPnl=arr=>arr.reduce((s,t)=>s+(Number(t.pnl)||0),0);
   const tradeDate=t=>dateOnly(t.entryDate);
   const filtered=()=>dashboardTradesForRange().filter(t=>{const sessionName=sessions.find(item=>item.id===t.sessionId)?.name||t.sessionName||'';return(journalFilters.instrument==='all'||t.symbol===journalFilters.instrument)&&(journalFilters.direction==='all'||t.direction===journalFilters.direction)&&(journalFilters.session==='all'||sessionName===journalFilters.session)&&[t.symbol,t.direction,t.strategy,t.tags,t.notes,sessionName].join(' ').toLowerCase().includes(searchTerm.toLowerCase())});
@@ -345,7 +357,47 @@
   const masonryObserver=new ResizeObserver(entries=>{let changed=false;entries.forEach(entry=>{const width=entry.contentRect.width;if(Math.abs((masonryWidths.get(entry.target)??-1)-width)>1){masonryWidths.set(entry.target,width);changed=true}});if(changed)scheduleMasonryLayout()});
   const observePageMasonry=()=>{masonryObserver.disconnect();masonryWidths=new WeakMap();const dashboardGrid=$('.dashboard-widgets');if(dashboardGrid)masonryObserver.observe(dashboardGrid);layoutPageMasonry();requestAnimationFrame(layoutPageMasonry);document.fonts?.ready.then(layoutPageMasonry)};
   window.addEventListener('resize',scheduleMasonryLayout);
+  // --- Server sync ---------------------------------------------------------
+  // localStorage is the fast path and the offline cache; Postgres is the
+  // durable copy. Writes are mirrored in persist(), and on boot we pull the
+  // server's journal and adopt it. The very first run for a user uploads
+  // whatever is already in this browser instead, so nothing is stranded.
+  const saveLocalState=()=>{
+    try{localStorage.setItem('luxTradeJournalTrades',JSON.stringify(trades))}catch{}
+    try{localStorage.setItem(instrumentKey,JSON.stringify(instruments))}catch{}
+    try{localStorage.setItem(sessionKey,JSON.stringify(sessions))}catch{}
+    try{localStorage.setItem(balanceBaseKey,String(balanceBase))}catch{}
+    try{localStorage.setItem(balanceAdjustmentsKey,JSON.stringify(balanceAdjustments))}catch{}
+    try{localStorage.setItem(dashboardLayoutKey,JSON.stringify(dashboardLayout))}catch{}
+  };
+  async function hydrateFromServer(){
+    const remote=await pull();
+    if(!remote)return; // signed out or offline — behave exactly as before
+    if(!remote.initialized){
+      pushTrades(trades);
+      queueSettings({instruments,sessions,balanceBase,balanceAdjustments,dashboardLayout});
+      return;
+    }
+    const serverTrades=Array.isArray(remote.trades)?remote.trades:[];
+    // Server wins, except that an empty server never wipes a non-empty local
+    // journal — that would turn a failed sync into data loss.
+    if(serverTrades.length)trades=serverTrades;
+    if(Array.isArray(remote.instruments)&&remote.instruments.length)instruments=remote.instruments;
+    if(Array.isArray(remote.sessions)&&remote.sessions.length)sessions=remote.sessions;
+    if(Number.isFinite(remote.balanceBase))balanceBase=remote.balanceBase;
+    if(Array.isArray(remote.balanceAdjustments)&&remote.balanceAdjustments.length)balanceAdjustments=remote.balanceAdjustments;
+    if(remote.dashboardLayout&&typeof remote.dashboardLayout==='object')dashboardLayout=remote.dashboardLayout;
+    saveLocalState();
+    // Prime only with rows the server already has; otherwise the local journal
+    // would be marked "synced" without ever being sent.
+    if(serverTrades.length)prime(trades);
+    else if(trades.length)pushTrades(trades);
+    render();
+  }
+  window.addEventListener('pagehide',()=>{flushNow()});
+
   render();replaceLucideGlyphs(pageContent);replaceLucideGlyphs($('#sidebar'));
+  hydrateFromServer();
   // --- Auto pips & net P/L calculation (shared engine with the TradingView
   // tab; uses instrument specs — pip size, contract size — from
   // src/tradingview/instruments.js, overridable via localStorage

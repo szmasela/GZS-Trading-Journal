@@ -2,6 +2,7 @@ import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite";
+import { createJournalApi } from "./server/journal.mjs";
 
 const backupDirectory = fileURLToPath(new URL("./public/backups", import.meta.url));
 const maxBackupBytes = 50 * 1024 * 1024;
@@ -237,7 +238,7 @@ function historicalReader() {
 }
 
 export default defineConfig({
-  plugins: [backupWriter(), historicalReader()],
+  plugins: [createJournalApi(), backupWriter(), historicalReader()],
   server: {
     host: "0.0.0.0",
     port: 5173,
