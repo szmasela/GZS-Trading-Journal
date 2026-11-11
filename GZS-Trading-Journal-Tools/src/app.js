@@ -2,7 +2,10 @@ import { getSessionToken } from './auth.js'
 import { pull, pushTrades, prime, queueSettings, flushNow, setTokenGetter } from './journalApi.js'
 
 // auth.js owns Clerk; journalApi only needs a way to ask for the current token.
-setTokenGetter(getSessionToken)
+// The trailing semicolon is load-bearing: without it the `(` that opens the
+// app IIFE below is parsed as a call on this expression's return value, so the
+// whole journal body never runs and the page renders blank.
+setTokenGetter(getSessionToken);
 
 (() => {
   const $ = (s, root=document) => root.querySelector(s);
