@@ -18,7 +18,7 @@
 
 import { loadEnv } from './env.mjs'
 import { query, queryOne } from './db.mjs'
-import { verifySessionToken } from './clerk.mjs'
+import { clerkDomain, verifySessionToken } from './clerk.mjs'
 
 const MAX_BODY_BYTES = 32 * 1024 * 1024
 
@@ -70,22 +70,33 @@ function readJson(req) {
 
 let warnedBadToken = false
 
+/**
+ * Who is calling. Returns `{ session, reason }` — the reason only matters when
+ * `session` is null, and exists so a 401 can say whether the request arrived
+ * with no token at all (someone opened the URL in a browser tab, which never
+ * carries one) or with a token this server refused (wrong Clerk key, stale
+ * session). Without it, those two look identical from the outside and the
+ * obvious conclusion — "sync is broken" — is usually the wrong one.
+ */
 async function identify(req) {
   const header = req.headers.authorization || ''
   const token = header.startsWith('Bearer ') ? header.slice(7).trim() : ''
   if (token) {
     const session = await verifySessionToken(token)
-    if (!session && !warnedBadToken) {
+    if (session) return { session, reason: 'ok' }
+    if (!warnedBadToken) {
       // A present-but-unverifiable token means the app will silently stay
       // local. Say so once, so a misconfigured Clerk key is not invisible.
       warnedBadToken = true
       console.warn('[journal] session token rejected — check VITE_CLERK_PUBLISHABLE_KEY and that the session is fresh')
     }
-    return session
+    return { session: null, reason: 'token-rejected' }
   }
   const devUser = loadEnv().JOURNAL_DEV_USER
-  if (devUser && process.env.NODE_ENV !== 'production') return { userId: devUser, sessionId: '' }
-  return null
+  if (devUser && process.env.NODE_ENV !== 'production') {
+    return { session: { userId: devUser, sessionId: '' }, reason: 'dev-user' }
+  }
+  return { session: null, reason: 'no-token' }
 }
 
 // ---------------------------------------------------------------- mapping --
@@ -568,14 +579,22 @@ export async function handleJournalRequest(req, res, options = {}) {
   const isJournalRoute = route === '/api/journal' || route.startsWith('/api/journal/')
   if (!isJournalRoute) return false
 
-  let session
+  let identity
   try {
-    session = await identify(req)
+    identity = await identify(req)
   } catch {
-    session = null
+    identity = { session: null, reason: 'no-token' }
   }
+  const session = identity.session
   if (!session) {
-    send(res, 401, { ok: false, error: 'Sign in to sync your journal' })
+    send(res, 401, {
+      ok: false,
+      error: 'Sign in to sync your journal',
+      reason: identity.reason,
+      // Tells "the function is deployed and has its env" apart from "the
+      // function is fine but the Clerk key never reached it".
+      clerk: clerkDomain() ? 'configured' : 'missing-publishable-key',
+    })
     return true
   }
   const userId = session.userId

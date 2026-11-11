@@ -57,7 +57,18 @@ The functions in `api/journal/` are picked up automatically — no `vercel.json`
 - **Two environment variables** are set for Production *and* Preview: `DATABASE_URL` (the Neon pooled connection string, no `VITE_` prefix) and `VITE_CLERK_PUBLISHABLE_KEY`. The server needs the publishable key too — it decodes it to find the Clerk instance domain for JWKS, which is why a deploy with only the database URL answers `401` to every request.
 - **`JOURNAL_DEV_USER` is not set there.** It is ignored in production anyway; this is just to avoid confusion when `db:check` works locally and the API doesn't.
 
-Check a deployment with `GET https://<domain>/api/journal/health` while signed in. `{"ok":true,...}` means function, credentials and auth are all fine; `401` means the token or Clerk key; a 500 naming the database means `DATABASE_URL`.
+**Checking a deployment.** Opening `https://<domain>/api/journal` in a browser tab always answers `401` — the Clerk token travels in an `Authorization` header, not a cookie, so a plain tab never sends one. That is the auth gate working, not a broken deploy. Read the body instead of the status:
+
+```json
+{ "ok": false, "error": "Sign in to sync your journal",
+  "reason": "no-token", "clerk": "configured" }
+```
+
+- `clerk: "configured"` proves the function is deployed *and* `VITE_CLERK_PUBLISHABLE_KEY` reached it. `"missing-publishable-key"` means the variable is absent at runtime.
+- `reason: "no-token"` is what a browser tab produces. `"token-rejected"` means a token was sent and this server refused it — a different Clerk key from the one the browser used, or an expired session.
+- A 500 naming the database means `DATABASE_URL` is wrong or the schema has not been migrated.
+
+The real end-to-end check is the app itself: sign in, open DevTools → Network, and look at the `/api/journal` request the page makes on load.
 
 **Body and response limits.** Vercel caps a function's request and response at 4.5 MB. Chart snapshots are base64 JPEGs (~60–110 KB each), so both directions are chunked rather than sent whole:
 
