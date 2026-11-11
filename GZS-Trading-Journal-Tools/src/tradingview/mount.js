@@ -480,7 +480,6 @@ export function mountTradingView(host, api = {}) {
                 <input id="tvLotInput" class="tv-lot-input" type="text" inputmode="decimal" autocomplete="off"
                        value="0.01" aria-label="Lot size" title="Lot size — type a value, or use ↑ ↓" />
                 <button type="button" class="tv-lot-step" id="tvLotUp" aria-label="Increase lot size" title="Increase (Shift: 0.1)">+</button>
-                <span class="tv-lot-unit">Lots</span>
               </div>
               <button type="button" id="tvBuy" class="tv-trade-btn tv-buy" title="Log a Long trade for this symbol">▲ Buy</button>
             </div>
