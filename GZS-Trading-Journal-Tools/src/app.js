@@ -128,7 +128,11 @@ setTokenGetter(getSessionToken);
   const defaultDashboardLayout=()=>({preset:'overview',cards:defaultDashboardCards.slice(),sizes:{...defaultDashboardSizes},layouts:{}});
   const normalizeLayoutCards=cards=>Array.isArray(cards)?[...new Set(cards.filter(id=>validDashboardCardIds.has(id)))]:[];
   const normalizeLayoutSizes=sizes=>{const result={};if(sizes&&typeof sizes==='object'&&!Array.isArray(sizes))Object.entries(sizes).forEach(([id,size])=>{if(!validDashboardCardIds.has(id)||!size||typeof size!=='object')return;const width=Number(size.width),height=Number(size.height);result[id]={...(Number.isInteger(width)&&width>=1&&width<=6?{width}:{}),...(Number.isInteger(height)&&height>=160&&height<=900?{height}:{})};if(!Object.keys(result[id]).length)delete result[id]});return result};
-  const readDashboardLayout=()=>{try{const raw=localStorage.getItem(dashboardLayoutKey);if(!raw)return defaultDashboardLayout();const saved=JSON.parse(raw);if(!saved||!Array.isArray(saved.cards))throw Error('Invalid dashboard layout');const preset=dashboardPresets.some(item=>item.id===saved.preset)?saved.preset:'custom',layouts={};if(saved.layouts&&typeof saved.layouts==='object'&&!Array.isArray(saved.layouts))Object.entries(saved.layouts).forEach(([id,layout])=>{if(!dashboardPresets.some(item=>item.id===id)||!layout||typeof layout!=='object')return;layouts[id]={cards:normalizeLayoutCards(layout.cards),sizes:normalizeLayoutSizes(layout.sizes)}});if(!layouts[preset])layouts[preset]={cards:normalizeLayoutCards(saved.cards),sizes:normalizeLayoutSizes(saved.sizes)};const active=layouts[preset];return{preset,cards:active.cards.slice(),sizes:{...active.sizes},layouts}}catch(error){alert(`Could not load the saved dashboard layout: ${error.message}`);return defaultDashboardLayout()}};
+  // Shared by the localStorage reader and the server pull. Anything that comes
+  // from outside goes through this: render() indexes `cards`, so a layout
+  // without an array there throws and leaves the page blank.
+  const normalizeDashboardLayout=saved=>{if(!saved||typeof saved!=='object'||!Array.isArray(saved.cards))return null;const preset=dashboardPresets.some(item=>item.id===saved.preset)?saved.preset:'custom',layouts={};if(saved.layouts&&typeof saved.layouts==='object'&&!Array.isArray(saved.layouts))Object.entries(saved.layouts).forEach(([id,layout])=>{if(!dashboardPresets.some(item=>item.id===id)||!layout||typeof layout!=='object')return;layouts[id]={cards:normalizeLayoutCards(layout.cards),sizes:normalizeLayoutSizes(layout.sizes)}});if(!layouts[preset])layouts[preset]={cards:normalizeLayoutCards(saved.cards),sizes:normalizeLayoutSizes(saved.sizes)};const active=layouts[preset];return{preset,cards:active.cards.slice(),sizes:{...active.sizes},layouts}};
+  const readDashboardLayout=()=>{try{const raw=localStorage.getItem(dashboardLayoutKey);if(!raw)return defaultDashboardLayout();const saved=normalizeDashboardLayout(JSON.parse(raw));if(!saved)throw Error('Invalid dashboard layout');return saved}catch(error){alert(`Could not load the saved dashboard layout: ${error.message}`);return defaultDashboardLayout()}};
   let dashboardLayout=readDashboardLayout();
   let dashboardMenuOpen='';
   let dashboardRange={preset:'1M',from:'',to:''};
@@ -393,7 +397,11 @@ setTokenGetter(getSessionToken);
     if(Array.isArray(remote.sessions)&&remote.sessions.length)sessions=remote.sessions;
     if(Number.isFinite(remote.balanceBase))balanceBase=remote.balanceBase;
     if(Array.isArray(remote.balanceAdjustments)&&remote.balanceAdjustments.length)balanceAdjustments=remote.balanceAdjustments;
-    if(remote.dashboardLayout&&typeof remote.dashboardLayout==='object')dashboardLayout=remote.dashboardLayout;
+    // Never adopt a layout raw: an object without a `cards` array would throw
+    // in render() and, because saveLocalState() runs first, make the blank page
+    // permanent on this device.
+    const serverLayout=normalizeDashboardLayout(remote.dashboardLayout);
+    if(serverLayout)dashboardLayout=serverLayout;
     saveLocalState();
     // Prime only with rows the server already has; otherwise the local journal
     // would be marked "synced" without ever being sent.
