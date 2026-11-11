@@ -215,10 +215,53 @@ setTokenGetter(getSessionToken);
   // Both snapshots of a trade open in one viewer, so entry and exit can be
   // compared without leaving the dialog. Sources: the trade dialog's previews
   // and the thumbnails in the journal table.
-  const photoGallery=$('#photoGallery'),galleryImage=$('#photoGalleryImage'),galleryThumbs=$('#photoGalleryThumbs');
+  const photoGallery=$('#photoGallery'),galleryImage=$('#photoGalleryImage'),galleryThumbs=$('#photoGalleryThumbs'),galleryInfo=$('#photoGalleryInfo');
   const PHOTO_META={entryPhoto:{label:'Entry photo',hint:'Before / at entry'},exitPhoto:{label:'Exit photo',hint:'After / at exit'}};
   let galleryShots=[],galleryIndex=0;
   const tradeShots=trade=>['entryPhoto','exitPhoto'].filter(key=>trade&&trade[key]).map(key=>({key,label:PHOTO_META[key].label,hint:PHOTO_META[key].hint,src:trade[key]}));
+  // The snapshot is only useful next to the numbers it belongs to, so the
+  // viewer carries the trade's own details alongside the picture.
+  const galleryDate=v=>{if(!v)return '—';const date=new Date(v);return Number.isNaN(+date)?safe(v):`${date.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'})} · ${String(date.getHours()).padStart(2,'0')}:${String(date.getMinutes()).padStart(2,'0')}`};
+  const galleryPrice=v=>v===''||v==null||Number.isNaN(Number(v))?'—':Number(v).toFixed(2);
+  function galleryInfoHtml(trade){
+    if(!trade)return '';
+    const session=sessions.find(item=>item.id===trade.sessionId);
+    const sessionName=trade.sessionName||session?.name||'—',sessionColor=trade.sessionColor||session?.color||'';
+    const direction=String(trade.direction||'').toLowerCase()==='short'?'Short':'Long';
+    const closed=String(trade.status||'')==='closed';
+    const pnl=Number(trade.pnl)||0;
+    const fact=(label,value,extra='')=>`<div class="photo-gallery-fact${extra?' '+extra:''}"><dt>${label}</dt><dd>${value}</dd></div>`;
+    return `<div class="photo-gallery-trade">
+        <div class="photo-gallery-trade-head"><b>${safe(trade.symbol||'—')}</b><span class="pill ${direction.toLowerCase()}">${direction}</span></div>
+        <div class="photo-gallery-pnl ${pnl>0?'positive':pnl<0?'negative':''}">${pnl>0?'+':pnl<0?'-':''}$${Math.abs(pnl).toFixed(2)}</div>
+        <small>Net P&amp;L · ${closed?'Closed':'Open'}</small>
+      </div>
+      <dl class="photo-gallery-facts">
+        ${fact('Entry',`${galleryDate(trade.entryDate)}<b>${galleryPrice(trade.entryPrice)}</b>`)}
+        ${fact('Exit',closed?`${galleryDate(trade.exitDate)}<b>${galleryPrice(trade.exitPrice)}</b>`:'<span class="photo-gallery-open">Still open</span>')}
+        ${fact('Lots',safe(trade.quantity===''||trade.quantity==null?'—':trade.quantity))}
+        ${fact('Pips',trade.pips===''||trade.pips==null?'—':safe(Number(trade.pips).toFixed(1)))}
+        ${fact('Session',sessionColor?`<span class="session-trade-dot" style="--session-color:${safe(sessionColor)}"></span>${safe(sessionName)}`:safe(sessionName))}
+        ${fact('Strategy',safe(trade.strategy||'—'))}
+        ${fact('Setup / tags',safe(trade.tags||'—'))}
+        ${trade.notes?fact('Notes',safe(trade.notes),'stacked'):''}
+      </dl>`;
+  }
+  // Reads the dialog's current values, so the panel matches what is on screen
+  // even when the trade has not been saved yet.
+  function tradeFromDialog(){
+    const session=sessions.find(item=>item.id===$('#tradeSession').value);
+    const num=selector=>{const field=$('#'+selector);return !field||field.value===''?'':Number(field.value)};
+    return {
+      symbol:$('#symbol').value,direction:$('#direction').value,
+      entryDate:$('#entryDate').value,exitDate:$('#exitDate').value,
+      entryPrice:num('entryPrice'),exitPrice:num('exitPrice'),
+      quantity:num('quantity'),pnl:num('pnl'),pips:$('#tradePips').value===''?'':Number($('#tradePips').value),
+      strategy:$('#strategy').value.trim(),tags:$('#tags').value.trim(),notes:$('#notes').value.trim(),
+      sessionId:session?.id||'',sessionName:session?.name||'',sessionColor:session?.color||'',
+      status:($('#exitPrice').value!==''||$('#exitDate').value)?'closed':'open'
+    };
+  }
   function showGalleryShot(){
     const shot=galleryShots[galleryIndex];
     if(!shot)return;
@@ -237,10 +280,13 @@ setTokenGetter(getSessionToken);
     galleryIndex=(galleryIndex+delta+galleryShots.length)%galleryShots.length;
     showGalleryShot();
   }
-  function openGallery(shots,index=0){
+  function openGallery(shots,index=0,trade=null){
     galleryShots=(shots||[]).filter(shot=>shot&&shot.src);
     if(!galleryShots.length)return;
     galleryIndex=Math.max(0,Math.min(index<0?0:index,galleryShots.length-1));
+    galleryInfo.innerHTML=galleryInfoHtml(trade);
+    galleryInfo.hidden=!trade;
+    $('#photoGalleryBody').classList.toggle('no-info',!trade);
     galleryThumbs.replaceChildren(...galleryShots.map((shot,position)=>{
       const button=document.createElement('button');
       button.type='button';
@@ -273,7 +319,7 @@ setTokenGetter(getSessionToken);
     event.stopPropagation();
     if(!photoValues[kind+'Photo'])return;
     const shots=tradeShots(photoValues);
-    openGallery(shots,shots.findIndex(shot=>shot.key===kind+'Photo'));
+    openGallery(shots,shots.findIndex(shot=>shot.key===kind+'Photo'),tradeFromDialog());
   }));
   // Journal rows: the thumbnail opens the same viewer instead of the trade.
   document.addEventListener('click',event=>{
@@ -284,7 +330,7 @@ setTokenGetter(getSessionToken);
     event.preventDefault();
     event.stopPropagation();
     const shots=tradeShots(trade);
-    openGallery(shots,shots.findIndex(shot=>shot.src===thumb.getAttribute('src')));
+    openGallery(shots,shots.findIndex(shot=>shot.src===thumb.getAttribute('src')),trade);
   },true);
   form.onsubmit=async e=>{e.preventDefault();let id=$('#tradeId').value||('trade_'+Date.now());const selectedSession=sessions.find(item=>item.id===$('#tradeSession').value);const previousTrade=trades.find(item=>item.id===id);const t={id,symbol:$('#symbol').value,direction:$('#direction').value,entryDate:$('#entryDate').value,exitDate:$('#exitDate').value,entryPrice:$('#entryPrice').value===''?'':Number($('#entryPrice').value),exitPrice:$('#exitPrice').value===''?'':Number($('#exitPrice').value),quantity:Number($('#quantity').value||0),pnl:Number($('#pnl').value||0),strategy:$('#strategy').value.trim(),tags:$('#tags').value.trim(),notes:$('#notes').value.trim(),sessionId:selectedSession?.id||'',sessionName:selectedSession?.name||($('#tradeSession').value?previousTrade?.sessionName||'':''),sessionColor:selectedSession?.color||($('#tradeSession').value?previousTrade?.sessionColor||'':''),...photoValues,commission:Number($('#commission').value||0),swap:Number($('#swap').value||0),fees:Number($('#fees').value||0),pips:$('#tradePips').value===''?'':Number($('#tradePips').value),status:($('#exitPrice').value!==''||$('#exitDate').value)?'closed':'open'};const i=trades.findIndex(x=>x.id===id);if(i>=0)trades[i]=t;else trades.push(t);persist();dlg.close();render();window.dispatchEvent(new Event('gzs:trades-changed'))};
   $('#deleteTradeBtn').onclick=()=>{let id=$('#tradeId').value;if(confirm('Delete this trade permanently?')){trades=trades.filter(t=>t.id!==id);persist();dlg.close();render();window.dispatchEvent(new Event('gzs:trades-changed'))}};

@@ -265,3 +265,28 @@ tbody tr.trade-row:focus-visible{outline:1px solid var(--blue);outline-offset:-2
   .photo-gallery-thumbs{padding:10px 14px 12px}
   .photo-gallery-thumb{width:84px;height:54px}
 }
+
+/* Trade details beside the snapshot. Collapses under the image on narrow
+   screens so the picture keeps the room. ---------------------------------- */
+.photo-gallery-body{display:grid;grid-template-columns:minmax(0,1fr) 300px;flex:1;min-height:0}
+.photo-gallery-body.no-info{grid-template-columns:minmax(0,1fr)}
+.photo-gallery-info{border-left:1px solid var(--line);background:var(--panel);padding:16px 18px;overflow-y:auto}
+.photo-gallery-info[hidden]{display:none}
+.photo-gallery-trade-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.photo-gallery-trade-head b{font-size:15px;letter-spacing:-.2px}
+.photo-gallery-pnl{margin-top:10px;font-size:26px;font-weight:750;letter-spacing:-.8px}
+.photo-gallery-trade small{display:block;margin-top:3px;color:var(--muted);font-size:10px}
+.photo-gallery-facts{margin:16px 0 0;display:grid}
+.photo-gallery-fact{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;padding:9px 0;border-top:1px solid var(--line)}
+.photo-gallery-fact:first-child{border-top:0;padding-top:0}
+.photo-gallery-fact dt{flex:none;color:var(--muted);font-size:9px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;padding-top:2px}
+.photo-gallery-fact dd{margin:0;min-width:0;text-align:right;font-size:11px;line-height:1.5;overflow-wrap:anywhere}
+.photo-gallery-fact dd b{display:block;font-size:12px}
+.photo-gallery-open{color:var(--muted)}
+.photo-gallery-fact .session-trade-dot{margin-right:6px}
+@media (max-width:900px){
+  .photo-gallery-body{grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,1fr) auto}
+  .photo-gallery-info{border-left:0;border-top:1px solid var(--line);max-height:40vh}
+}
+.photo-gallery-fact.stacked{display:grid;gap:5px}
+.photo-gallery-fact.stacked dd{text-align:left;color:var(--muted);line-height:1.55}
