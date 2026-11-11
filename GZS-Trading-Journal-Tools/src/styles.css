@@ -293,3 +293,22 @@ tbody tr.trade-row:focus-visible{outline:1px solid var(--blue);outline-offset:-2
 }
 .photo-gallery-fact.stacked{display:grid;gap:5px}
 .photo-gallery-fact.stacked dd{text-align:left;color:var(--muted);line-height:1.55}
+
+/* --- Saved dashboard layouts --------------------------------------------
+   A saved layout is a row in the same list as the built-in presets, with
+   rename and delete controls beside it. --------------------------------- */
+.layout-preset-row{display:flex;align-items:center;gap:4px}
+.layout-preset-row .layout-preset{flex:1;min-width:0}
+.layout-preset-row.renaming{gap:6px;padding:4px 0}
+.layout-icon-btn{flex:none;display:grid;place-items:center;width:26px;height:26px;padding:0;border:1px solid transparent;border-radius:6px;background:transparent;color:var(--muted);font-size:13px;line-height:1;cursor:pointer}
+.layout-icon-btn:hover{background:var(--panel2);border-color:var(--line);color:var(--text)}
+.layout-icon-btn:focus-visible{outline:2px solid var(--blue);outline-offset:1px}
+.layout-rename-input{flex:1;min-width:0;background:var(--bg);border:1px solid var(--line);border-radius:6px;color:var(--text);padding:7px 9px;font-size:11px}
+.layout-rename-input:focus{outline:none;border-color:var(--green)}
+.layout-preset-row.renaming .secondary-btn{flex:none;padding:7px 10px;font-size:11px}
+.layout-save{border-top:1px solid var(--line);margin-top:14px;padding-top:12px}
+.layout-save-label{display:block;margin-bottom:7px;color:var(--muted);font-size:9px;font-weight:800;letter-spacing:.7px;text-transform:uppercase}
+.layout-save-row{display:flex;gap:6px}
+.layout-save-row input{flex:1;min-width:0;background:var(--bg);border:1px solid var(--line);border-radius:7px;color:var(--text);padding:8px 10px;font-size:11px}
+.layout-save-row input:focus{outline:none;border-color:var(--green)}
+.layout-save-row .secondary-btn{flex:none;padding:8px 12px;font-size:11px}
