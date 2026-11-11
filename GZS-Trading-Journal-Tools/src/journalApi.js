@@ -16,6 +16,15 @@
 const BASE = `${globalThis.__JOURNAL_API_ORIGIN__ || ''}/api/journal`
 const SETTINGS_DEBOUNCE_MS = 500
 
+// Hosts cap request bodies (Vercel rejects anything over 4.5 MB before the
+// function even runs), and a trade with two chart snapshots is roughly 90 KB.
+// A first upload of a few hundred trades would otherwise fail as one big POST,
+// so changes go out in batches that stay comfortably under the limit. A batch
+// that fails stops the run: the unsent ones stay in `lastSynced` as dirty and
+// the next push retries them.
+const MAX_BATCH_BYTES = 2.5 * 1024 * 1024
+const MAX_BATCH_TRADES = 25
+
 // The token source is injected by app.js (auth.js owns Clerk), which keeps
 // this module free of browser-only imports and testable in Node.
 let tokenGetter = async () => ''
@@ -69,8 +78,39 @@ async function call(path, options = {}) {
 
 /** Full journal for the signed-in user, or null when sync is unavailable. */
 export async function pull() {
-  const data = await call('')
-  return data?.ok ? data : null
+  // Trade metadata first. The snapshots are fetched separately, in pages, so
+  // a journal whose photos add up to more than a host's response limit still
+  // loads completely instead of failing as one oversized response.
+  const data = await call('?photos=0')
+  if (!data?.ok) return null
+  await attachPhotos(Array.isArray(data.trades) ? data.trades : [])
+  return data
+}
+
+const PHOTO_PAGE_SIZE = 12
+const MAX_PHOTO_PAGES = 500
+
+/**
+ * Fill in `entryPhoto`/`exitPhoto` on the trades in place. A failure here is
+ * not fatal: the journal still opens, just without the pictures, and the next
+ * boot tries again.
+ */
+async function attachPhotos(trades) {
+  if (!trades.length) return
+  const byId = new Map(trades.map((trade) => [trade.id, trade]))
+  let cursor = 0
+  for (let page = 0; page < MAX_PHOTO_PAGES; page += 1) {
+    const result = await call(`/photos?cursor=${cursor}&limit=${PHOTO_PAGE_SIZE}`)
+    if (!result?.ok) return
+    for (const photo of result.photos || []) {
+      const trade = byId.get(photo.id)
+      if (!trade) continue
+      if (photo.kind === 'entry') trade.entryPhoto = photo.dataUrl
+      if (photo.kind === 'exit') trade.exitPhoto = photo.dataUrl
+    }
+    if (result.nextCursor === null || result.nextCursor === undefined) return
+    cursor = result.nextCursor
+  }
 }
 
 /**
@@ -102,14 +142,42 @@ export async function pushTrades(trades) {
   }
   if (!upserts.length && !deletes.length) return true
 
-  const result = await call('/sync', {
-    method: 'POST',
-    body: JSON.stringify({ upserts: upserts.map((entry) => entry.trade), deletes }),
-  })
-  if (!result?.ok) return false
+  // Pack changes into requests. Snapshots are base64 in the JSON, so the
+  // string length is a good proxy for the bytes on the wire.
+  const batches = []
+  let batch = []
+  let bytes = 0
+  for (const entry of upserts) {
+    const size = entry.json.length + 1
+    if (batch.length && (batch.length >= MAX_BATCH_TRADES || bytes + size > MAX_BATCH_BYTES)) {
+      batches.push(batch)
+      batch = []
+      bytes = 0
+    }
+    batch.push(entry)
+    bytes += size
+  }
+  if (batch.length) batches.push(batch)
+  if (!batches.length) batches.push([]) // deletions only
 
-  for (const entry of upserts) lastSynced.set(entry.trade.id, entry.json)
-  for (const id of deletes) lastSynced.delete(id)
+  for (const [index, group] of batches.entries()) {
+    const result = await call('/sync', {
+      method: 'POST',
+      body: JSON.stringify({
+        upserts: group.map((entry) => entry.trade),
+        // Deletions ride along with the first batch; they are a few bytes each.
+        deletes: index === 0 ? deletes : [],
+      }),
+    })
+    // Stop at the first failure rather than hammering a server that is down or
+    // a payload it will not take. Whatever did land is recorded below, so the
+    // retry only re-sends the rest.
+    if (!result?.ok) return false
+
+    for (const entry of group) lastSynced.set(entry.trade.id, entry.json)
+    if (index === 0) for (const id of deletes) lastSynced.delete(id)
+  }
+
   return true
 }
 

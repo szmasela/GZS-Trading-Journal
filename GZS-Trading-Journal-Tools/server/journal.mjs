@@ -31,6 +31,19 @@ function send(res, status, payload) {
 }
 
 function readJson(req) {
+  // Some hosts (and the Node integration tests) hand over a body that has
+  // already been consumed and parsed. Use it rather than waiting on a stream
+  // that will never emit another chunk.
+  if (req.body && typeof req.body === 'object' && !Buffer.isBuffer(req.body)) {
+    return Promise.resolve(req.body)
+  }
+  if (typeof req.body === 'string') {
+    try {
+      return Promise.resolve(req.body ? JSON.parse(req.body) : {})
+    } catch {
+      return Promise.reject(Object.assign(new Error('Invalid JSON body'), { status: 400 }))
+    }
+  }
   return new Promise((resolve, reject) => {
     const chunks = []
     let size = 0
@@ -76,6 +89,27 @@ async function identify(req) {
 }
 
 // ---------------------------------------------------------------- mapping --
+
+/**
+ * Run `worker` over `items` with at most `limit` in flight. Each item's own
+ * steps stay sequential — that matters below, where a trade's row must exist
+ * before its snapshot's `exists` guard can see it — but different items
+ * overlap. Serverless bills the wall clock, and Neon's HTTP endpoint answers
+ * one statement per round trip, so serialising everything was the slow part.
+ */
+async function mapLimit(items, limit, worker) {
+  const results = new Array(items.length)
+  let next = 0
+  const runners = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    for (;;) {
+      const index = next++
+      if (index >= items.length) return
+      results[index] = await worker(items[index], index)
+    }
+  })
+  await Promise.all(runners)
+  return results
+}
 
 const num = (value) => {
   if (value === '' || value === null || value === undefined) return null
@@ -205,7 +239,15 @@ async function ensureUser(userId) {
   await query('insert into app_users (id) values ($1) on conflict (id) do nothing', [userId])
 }
 
-async function readTrades(userId) {
+async function readTrades(userId, { photos = true } = {}) {
+  if (!photos) {
+    // Metadata only. A journal with a chart snapshot on every trade is several
+    // MB of base64, which overruns a serverless response limit — the client
+    // asks for the pictures in pages afterwards instead.
+    const rows = await query(TRADE_SELECT, [userId])
+    return rows.map((row) => toTrade(row))
+  }
+
   const [rows, snapshots] = await Promise.all([
     query(TRADE_SELECT, [userId]),
     query(
@@ -225,6 +267,41 @@ async function readTrades(userId) {
   }
 
   return rows.map((row) => toTrade(row, photosByTrade.get(row.id)))
+}
+
+/**
+ * One page of chart snapshots, walking trades in the same order as
+ * TRADE_SELECT so `cursor` is just an offset into that list.
+ *
+ * @returns {Promise<{photos: Array<{id: string, kind: string, dataUrl: string}>, count: number}>}
+ */
+async function readPhotosPage(userId, cursor, limit) {
+  const rows = await query(
+    `with page as (
+       select id, entry_at, created_at
+         from trades
+        where user_id = $1 and deleted_at is null
+        order by entry_at desc nulls last, created_at desc
+        limit $2 offset $3
+     )
+     select page.id, s.kind, s.data_url
+       from page
+       left join trade_snapshots s on s.trade_id = page.id
+      order by page.entry_at desc nulls last, page.created_at desc, s.kind`,
+    [userId, limit, cursor],
+  )
+
+  // `count` is distinct trades in the page, not rows: a trade with both
+  // snapshots returns two rows, and the cursor must advance by trades.
+  const ids = new Set()
+  const photos = []
+  for (const row of rows) {
+    ids.add(row.id)
+    if (row.kind && row.data_url) {
+      photos.push({ id: row.id, kind: row.kind, dataUrl: row.data_url })
+    }
+  }
+  return { photos, count: ids.size }
 }
 
 /**
@@ -315,13 +392,16 @@ async function readSettings(userId) {
 }
 
 async function writeTrades(userId, { upserts = [], deletes = [] } = {}) {
-  let written = 0
-  let removed = 0
+  const writeList = (Array.isArray(upserts) ? upserts : []).filter(
+    (trade) => trade && typeof trade.id === 'string' && trade.id,
+  )
+  const deleteList = (Array.isArray(deletes) ? deletes : []).filter(
+    (id) => typeof id === 'string' && id,
+  )
 
-  for (const trade of Array.isArray(upserts) ? upserts : []) {
-    if (!trade || typeof trade.id !== 'string' || !trade.id) continue
+  // One trade at a time within a trade; several trades at a time overall.
+  await mapLimit(writeList, 8, async (trade) => {
     await query(TRADE_UPSERT, tradeParams(trade, userId))
-    written += 1
 
     for (const [kind, key] of [
       ['entry', 'entryPhoto'],
@@ -330,7 +410,7 @@ async function writeTrades(userId, { upserts = [], deletes = [] } = {}) {
       const dataUrl = text(trade[key])
       if (dataUrl) {
         // The `exists` guard keeps a forged trade id from writing a snapshot
-        // onto another user's trade.
+        // onto another user's trade. It relies on the row above having landed.
         await query(
           `insert into trade_snapshots (trade_id, kind, data_url)
            select $1, $2, $3
@@ -349,21 +429,19 @@ async function writeTrades(userId, { upserts = [], deletes = [] } = {}) {
         )
       }
     }
-  }
+  })
 
-  for (const id of Array.isArray(deletes) ? deletes : []) {
-    if (typeof id !== 'string' || !id) continue
-    // Soft delete: the row becomes a tombstone so other devices can tell a
-    // deliberate deletion from a missing row. Purged after 30 days.
-    await query(
+  // Soft delete: the row becomes a tombstone so other devices can tell a
+  // deliberate deletion from a missing row. Purged after 30 days.
+  await mapLimit(deleteList, 8, (id) =>
+    query(
       `update trades set deleted_at = now(), updated_at = now()
         where id = $1 and user_id = $2 and deleted_at is null`,
       [id, userId],
-    )
-    removed += 1
-  }
+    ),
+  )
 
-  return { written, removed }
+  return { written: writeList.length, removed: deleteList.length }
 }
 
 async function writeSettings(userId, body) {
@@ -472,64 +550,102 @@ async function health(userId) {
 
 // --------------------------------------------------------------- middleware --
 
+/**
+ * Handle one /api/journal request. Framework-neutral on purpose: the Vite dev
+ * middleware below and the Vercel Functions in `api/` both call this, so there
+ * is exactly one implementation of the routes and one place to fix a bug.
+ *
+ * @param {import('node:http').IncomingMessage} req
+ * @param {import('node:http').ServerResponse} res
+ * @param {{ route?: string }} [options] absolute path to handle; defaults to
+ *   the request URL's pathname (Vercel functions know their own route, so they
+ *   pass it explicitly and don't depend on how the host rewrites `req.url`)
+ * @returns {Promise<boolean>} true when this handled the request
+ */
+export async function handleJournalRequest(req, res, options = {}) {
+  const url = new URL(req.url || '/', 'http://localhost')
+  const route = (options.route || url.pathname).replace(/\/+$/, '') || '/'
+  const isJournalRoute = route === '/api/journal' || route.startsWith('/api/journal/')
+  if (!isJournalRoute) return false
+
+  let session
+  try {
+    session = await identify(req)
+  } catch {
+    session = null
+  }
+  if (!session) {
+    send(res, 401, { ok: false, error: 'Sign in to sync your journal' })
+    return true
+  }
+  const userId = session.userId
+
+  try {
+    if (route === '/api/journal/health' && req.method === 'GET') {
+      send(res, 200, await health(userId))
+      return true
+    }
+
+    if (route === '/api/journal' && req.method === 'GET') {
+      // `?photos=0` leaves the snapshots out so the payload stays small; the
+      // client then collects them from /api/journal/photos page by page.
+      const withPhotos = url.searchParams.get('photos') !== '0'
+      const [trades, deleted, settings] = await Promise.all([
+        readTrades(userId, { photos: withPhotos }),
+        readTombstones(userId),
+        readSettings(userId),
+      ])
+      send(res, 200, { ok: true, user: userId, trades, deleted, ...settings })
+      return true
+    }
+
+    if (route === '/api/journal/photos' && req.method === 'GET') {
+      const cursor = Math.max(0, Math.trunc(Number(url.searchParams.get('cursor'))) || 0)
+      const requested = Math.trunc(Number(url.searchParams.get('limit'))) || 20
+      const limit = Math.min(50, Math.max(1, requested))
+      const page = await readPhotosPage(userId, cursor, limit)
+      send(res, 200, {
+        ok: true,
+        photos: page.photos,
+        // A short page is the last page; anything else means there is more.
+        nextCursor: page.count < limit ? null : cursor + page.count,
+      })
+      return true
+    }
+
+    if (route === '/api/journal/sync' && req.method === 'POST') {
+      const body = await readJson(req)
+      await ensureUser(userId)
+      const result = await writeTrades(userId, body)
+      const purged = await purgeTombstones(userId).catch(() => 0)
+      send(res, 200, { ok: true, ...result, purged })
+      return true
+    }
+
+    if (route === '/api/journal/settings' && req.method === 'POST') {
+      const body = await readJson(req)
+      await ensureUser(userId)
+      send(res, 200, { ok: true, settings: await writeSettings(userId, body) })
+      return true
+    }
+
+    send(res, 404, { ok: false, error: 'Unknown journal route' })
+    return true
+  } catch (error) {
+    const status = error.status || 500
+    send(res, status, {
+      ok: false,
+      error: status === 500 ? `Database error: ${error.message}` : error.message,
+    })
+    return true
+  }
+}
+
+/** Vite plugin: mounts the handler in `vite dev` and `vite preview`. */
 export function createJournalApi() {
   const middleware = async (req, res, next) => {
-    const url = new URL(req.url || '/', 'http://localhost')
-    const route = url.pathname
-    if (route !== '/api/journal' && !route.startsWith('/api/journal/')) return next()
-
-    let session
-    try {
-      session = await identify(req)
-    } catch {
-      session = null
-    }
-    if (!session) {
-      send(res, 401, { ok: false, error: 'Sign in to sync your journal' })
-      return
-    }
-    const userId = session.userId
-
-    try {
-      if (route === '/api/journal/health' && req.method === 'GET') {
-        send(res, 200, await health(userId))
-        return
-      }
-
-      if (route === '/api/journal' && req.method === 'GET') {
-        const [trades, deleted, settings] = await Promise.all([
-          readTrades(userId),
-          readTombstones(userId),
-          readSettings(userId),
-        ])
-        send(res, 200, { ok: true, user: userId, trades, deleted, ...settings })
-        return
-      }
-
-      if (route === '/api/journal/sync' && req.method === 'POST') {
-        const body = await readJson(req)
-        await ensureUser(userId)
-        const result = await writeTrades(userId, body)
-        const purged = await purgeTombstones(userId).catch(() => 0)
-        send(res, 200, { ok: true, ...result, purged })
-        return
-      }
-
-      if (route === '/api/journal/settings' && req.method === 'POST') {
-        const body = await readJson(req)
-        await ensureUser(userId)
-        send(res, 200, { ok: true, settings: await writeSettings(userId, body) })
-        return
-      }
-
-      send(res, 404, { ok: false, error: 'Unknown journal route' })
-    } catch (error) {
-      const status = error.status || 500
-      send(res, status, {
-        ok: false,
-        error: status === 500 ? `Database error: ${error.message}` : error.message,
-      })
-    }
+    if (await handleJournalRequest(req, res)) return
+    next()
   }
 
   return {

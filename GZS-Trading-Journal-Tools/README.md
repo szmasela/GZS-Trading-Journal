@@ -39,14 +39,32 @@ Chart snapshots live in `trade_snapshots`, not on the trade row: a 32 KB JPEG da
 
 | Route | Purpose |
 | --- | --- |
-| `GET /api/journal` | Everything for the signed-in user: trades (with snapshots), instruments, sessions, balance, dashboard layout |
+| `GET /api/journal` | Everything for the signed-in user: trades (with snapshots), instruments, sessions, balance, dashboard layout. Add `?photos=0` to leave the snapshots out |
+| `GET /api/journal/photos` | `?cursor=<n>&limit=<n>` — chart snapshots a page at a time |
 | `POST /api/journal/sync` | `{ upserts: [trade], deletes: [id] }` |
 | `POST /api/journal/settings` | `{ instruments, sessions, balanceBase, balanceAdjustments, dashboardLayout }` — only the keys present are replaced |
 | `GET /api/journal/health` | Row counts for the signed-in user |
 
-The routes are a Vite plugin (`server/journal.mjs`), so they run in `vite dev` and `vite preview` with no extra process. Requests carry `Authorization: Bearer <clerk session token>`; `server/clerk.mjs` verifies the RS256 signature against the instance JWKS and uses `sub` as `user_id`. A request without a valid token gets `401` and the client quietly stays local — the journal never stops working because sync is unavailable.
+There is one implementation of these routes, in `server/journal.mjs`, and two ways to reach it: a Vite plugin for `vite dev` / `vite preview`, and the files in `api/journal/` for Vercel. Both call `handleJournalRequest`, so a bug is fixed once. Requests carry `Authorization: Bearer <clerk session token>`; `server/clerk.mjs` verifies the RS256 signature against the instance JWKS and uses `sub` as `user_id`. A request without a valid token gets `401` and the client quietly stays local — the journal never stops working because sync is unavailable.
 
 For local testing without a Clerk session, start the dev server with `JOURNAL_DEV_USER=someone npm run dev`. Unsigned requests then act as that user. It is ignored when `NODE_ENV=production`.
+
+### Deploying to Vercel
+
+The functions in `api/journal/` are picked up automatically — no `vercel.json` and no build step for them. Three things have to be true:
+
+- **Root Directory is this folder** (`GZS-Trading-Journal-Tools`), not the repo root. Vercel only scans `api/` inside the configured root, and this is also where `package.json` and `vite.config.js` live. Output directory `dist`, framework preset Vite.
+- **Two environment variables** are set for Production *and* Preview: `DATABASE_URL` (the Neon pooled connection string, no `VITE_` prefix) and `VITE_CLERK_PUBLISHABLE_KEY`. The server needs the publishable key too — it decodes it to find the Clerk instance domain for JWKS, which is why a deploy with only the database URL answers `401` to every request.
+- **`JOURNAL_DEV_USER` is not set there.** It is ignored in production anyway; this is just to avoid confusion when `db:check` works locally and the API doesn't.
+
+Check a deployment with `GET https://<domain>/api/journal/health` while signed in. `{"ok":true,...}` means function, credentials and auth are all fine; `401` means the token or Clerk key; a 500 naming the database means `DATABASE_URL`.
+
+**Body and response limits.** Vercel caps a function's request and response at 4.5 MB. Chart snapshots are base64 JPEGs (~60–110 KB each), so both directions are chunked rather than sent whole:
+
+- Writes go out in batches of at most 25 trades / 2.5 MB (`pushTrades`). A failed batch stops the run and leaves the rest dirty for the next attempt.
+- Reads fetch trade metadata first (`?photos=0`), then walk `/api/journal/photos` twelve trades at a time. Photos are cosmetic here: if that walk fails, the journal still opens without them.
+
+Writes are also parallelised eight at a time on the server. Each statement is still its own round trip to Neon, so a 25-trade batch is ~75 requests; serialised that was seconds of wall clock, overlapped it is well under a second.
 
 ### How sync behaves
 
