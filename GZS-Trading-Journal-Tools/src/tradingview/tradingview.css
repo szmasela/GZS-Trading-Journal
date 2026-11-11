@@ -324,6 +324,77 @@
   box-shadow: 0 6px 18px rgba(0, 0, 0, .45);
 }
 
+/* Lot size, sitting between Sell and Buy. Deliberately quiet: it is a number
+   you set once and glance at, not a control that competes with the buttons. */
+.tv-lot {
+  flex: none;
+  display: flex;
+  align-items: stretch;
+  width: 140px;
+  background: rgba(16, 21, 28, .94);
+  border: 1px solid var(--tv-line);
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, .45);
+  transition: border-color .12s ease, box-shadow .12s ease;
+}
+
+.tv-lot:focus-within {
+  border-color: #37d6a0;
+  box-shadow: 0 0 0 2px rgba(55, 214, 160, .18);
+}
+
+.tv-lot-step {
+  appearance: none;
+  flex: none;
+  width: 25px;
+  border: 0;
+  background: transparent;
+  color: var(--tv-muted, #8b98ad);
+  font-size: 15px;
+  font-weight: 800;
+  line-height: 1;
+  cursor: pointer;
+  transition: background .12s ease, color .12s ease;
+}
+
+.tv-lot-step:hover { background: rgba(255, 255, 255, .07); color: #e8eef8; }
+.tv-lot-step:active { background: rgba(255, 255, 255, .13); }
+
+.tv-lot-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: 100%;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: #e8eef8;
+  font-size: 12.5px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.tv-lot-input:focus { outline: none; }
+
+.tv-lot-unit {
+  flex: none;
+  display: grid;
+  place-items: center;
+  padding: 0 9px 0 6px;
+  border-left: 1px solid rgba(255, 255, 255, .07);
+  color: var(--tv-muted, #8b98ad);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: .5px;
+  text-transform: uppercase;
+}
+
+@media (max-width: 700px) {
+  .tv-lot { width: 94px; }
+  .tv-lot-unit { display: none; }
+}
+
 .tv-active {
   background: rgba(16, 21, 28, .92);
   border: 1px solid var(--tv-line);

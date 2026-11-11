@@ -475,6 +475,13 @@ export function mountTradingView(host, api = {}) {
           <div class="tv-overlay">
             <div class="tv-quick">
               <button type="button" id="tvSell" class="tv-trade-btn tv-sell" title="Log a Short trade for this symbol">▼ Sell</button>
+              <div class="tv-lot" id="tvLot" role="group" aria-label="Lot size for new trades">
+                <button type="button" class="tv-lot-step" id="tvLotDown" aria-label="Decrease lot size" title="Decrease (Shift: 0.1)">−</button>
+                <input id="tvLotInput" class="tv-lot-input" type="text" inputmode="decimal" autocomplete="off"
+                       value="0.01" aria-label="Lot size" title="Lot size — type a value, or use ↑ ↓" />
+                <button type="button" class="tv-lot-step" id="tvLotUp" aria-label="Increase lot size" title="Increase (Shift: 0.1)">+</button>
+                <span class="tv-lot-unit">Lots</span>
+              </div>
               <button type="button" id="tvBuy" class="tv-trade-btn tv-buy" title="Log a Long trade for this symbol">▲ Buy</button>
             </div>
             <div class="tv-active collapsed" id="tvActivePanel">
@@ -616,6 +623,62 @@ export function mountTradingView(host, api = {}) {
   }
   syncFullscreenButton()
 
+  // --- lot size -------------------------------------------------------------
+  // Between Sell and Buy, the way an order ticket puts it: the size is part of
+  // placing the trade, so it belongs next to the buttons instead of in the
+  // edit dialog afterwards. The input's value is the single source of truth —
+  // mountTradingView runs again on every page re-render, and closure state
+  // would go stale across those runs.
+  const lotInput = body.querySelector('#tvLotInput')
+  const LOT_MIN = 0.01
+  const LOT_MAX = 100
+  const LOT_KEY = 'tvLotSize'
+
+  const clampLot = (value) => Math.min(LOT_MAX, Math.max(LOT_MIN, Math.round(value * 100) / 100))
+
+  function readLotSize() {
+    const parsed = Number(String(lotInput.value).replace(',', '.').trim())
+    return Number.isFinite(parsed) && parsed > 0 ? clampLot(parsed) : clampLot(LOT_MIN)
+  }
+
+  function writeLotSize(value) {
+    const next = clampLot(value)
+    lotInput.value = next.toFixed(2)
+    try { localStorage.setItem(LOT_KEY, String(next)) } catch { /* private mode */ }
+  }
+
+  function stepLot(direction, event) {
+    // Shift jumps by a tenth — the difference between nudging a size and
+    // changing it.
+    writeLotSize(readLotSize() + direction * (event && event.shiftKey ? 0.1 : 0.01))
+  }
+
+  body.querySelector('#tvLotUp').onclick = (event) => stepLot(1, event)
+  body.querySelector('#tvLotDown').onclick = (event) => stepLot(-1, event)
+
+  if (!lotInput.dataset.lotBound) {
+    lotInput.dataset.lotBound = '1'
+    const saved = Number(localStorage.getItem(LOT_KEY))
+    if (Number.isFinite(saved) && saved > 0) writeLotSize(saved)
+    // Reformat on commit, not on every keystroke: rewriting the value mid-typing
+    // moves the caret and makes "0.05" impossible to type.
+    lotInput.addEventListener('change', () => writeLotSize(readLotSize()))
+    lotInput.addEventListener('blur', () => writeLotSize(readLotSize()))
+    lotInput.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault()
+        writeLotSize(readLotSize())
+        lotInput.blur()
+      } else if (event.key === 'ArrowUp') {
+        event.preventDefault()
+        stepLot(1, event)
+      } else if (event.key === 'ArrowDown') {
+        event.preventDefault()
+        stepLot(-1, event)
+      }
+    })
+  }
+
   // --- Buy / Sell quick-log buttons ------------------------------------------
   // Prefill entry price from the live feed (XAUUSD) and auto-detect the
   // trading session from the current time.
@@ -639,6 +702,7 @@ export function mountTradingView(host, api = {}) {
       direction,
       entryDate: localDateTime(),
       entryPrice: price,
+      quantity: readLotSize(),
       sessionId: session ? session.id : '',
       entryPhoto: snapshot || ''
     }
